@@ -1,0 +1,3494 @@
+---
+title: "Analisis de Resultados sobre la Primera Simulacion"
+author: "Jose Antonio Castellón García"
+date: "11/6/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: true
+    df_print: paged
+    theme: united
+    highlight: tango
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r,message=FALSE}
+library(CoExpNets)
+library(CoExpROSMAP)
+CoExpROSMAP::initDb()
+library(reshape2)
+library(ggplot2)
+library(WGCNA)
+library(BioQC)
+library(readxl)
+library(kableExtra)
+library(dplyr)
+library(entropy)
+```
+
+# Introducción
+
+Durante este documento realizaremos la simulación correspondiente para estimar los valores de bootstraps necesarios según el tamaño de la submuestra que tengamos. Desarrollaremos un proceso de metodología para introducir los pasos que seguiremos en la simulación. El objetivo es estudiar las redes que nos aparecen con diferentes valores en el tamaño de la submuestra y en el número de bootstraps. 
+
+Inicialmente indicaremos, uno por uno, los métodos comparativos que tenemos, represenatermos en una gráfica la evolución de los diferentes indicadores según el número de bootstraps que tenemo. Por último, trataremos de realizar una función para que calcule los estadísticos de cada red dada y otra función que nos permita represtentar en una gráfica los resultados dados.
+
+
+# Metodología
+
+Tomaremos las $200$ muestras de los pacientes considerados cómo nuestro universo completo. De esta forma, trataremos de desarrollar una implementación que de lugar a un proceso de simulación el cual nos permita contestar a la principal pregunta de este trabajo. La idea general viene dada por la creación de submuestras de diferentes tamaños de la muestra original y, para cada muestra, crear varias redes de co-expresión con, a su vez, distintos tamaños de bootstraps.
+
+El primer paso, antes de nada, será comprobar el funcionamiento del método bootstraps para la creación de redes de co-expresión y, además, iniciarnos en las distintas formas de comparación de redes que llevaremos a cabo. Partiendo de los datos originales, tomaremos una submuestra de tamaño $190$, eligiendo así un valor bastante cercano al tamaño total que tenemos. De este modo, realizaremos, con el método `getBootstrapNetwork` visto antes, dos redes de co-expresión con distintos valores sobre el tamaño de remuestreos bootstraps realizados para la elaboración de la red bootstrap final. Es decir, tendremos dos redes bootstraps, realizadas a partir de la submuestra de tamaño $190$, en las que una tiene un tamaño de bootstrap mayor. Tomaremos, por ejemplo, una red con $20$ bootstraps y otra con $40$. La intención en esta primera incursión es introducir los métodos comparativos que vamos a desarrolar a lo largo de esta simulación. Además, se esperan buenos resultados puesto que estamos trabajando con un tamaño de submuestra cercano a la muestra inicial. Es decir, podemos ver esto cómo un primer ejemplo de lo que desarrolaremos a continuación. 
+
+Hecho esto, comenzaremos con el proceso de simulación para intentar contestar la principal pregunta sobre la que trata este trabajo y que hemos introducido en secciones anteriores. Para ello, intentaremos explicar detalladamente los pasos que seguiremos en este proceso. 
+
++ En primer lugar tendrá la elección de los tamaños correspondientes a las submuestras. Tomaremos submuestras incrementando en diez el tamaño de cada una, es decir, comenzaremos con una submuestra de tamaño $10$, la siguiente de tamaño $20$ y así continuaremos progresivamente, como mucho hasta un tamaño de $40$ o $50$ muestras. De este modo, intentaremos ver si existe algún tipo de progresión del tamaño de bootstraps necesarios, con respecto al aumento del tamaño de la muestra.
+
++ Para cada tamaño realizaremos varias redes de co-expresión, cada una con diferentes tamaños de bootstraps. En este caso el incremento en el número de bootstraps a realizar será de cinco en cinco. Partiendo de una inicial de $10$ bootstraps, la siguiente red con $15$ y así progresivamente hasta un total de $50$ bootstraps. La idea es obtener una red lo más parecida a la red inicial. De esta forma, estudiaremos también la progresión que sigue el aumento de bootstraps según el tamaño de muestra que tengamos. Tampoco podemos tomar tantos bootstraps, puesto que, computacionalmente, la creación de redes de co-expresión es un proceso muy costoso.
+
+Cabe destacar que, tomamos esos valores de submuestra puesto que el método de bootstrapping está pensado para situaciones límite, en el que nos encontramos con una tamaño de muestra bastante bajo. Por eso debemos de estudiar la eficacia del método con esos correspondientes tamaños.
+
+Finalmente tendremos varias redes de co-expresión, elaboradas con diferentes tamaños de bootstraps para diferentes tamaño de submuestras obtenidas. El objetivo, a modo de recuerdo, será responder, de manera intuitiva, cuantos bootstraps son necesarios para obtener una red de co-expresión lo más parecida a la inicial dada una submuestra de un tamaño determinado. Así, cada vez que creemos una red de co-expresión se realizará un proceso de comparación, para determinar la validez de la red obtenida. La idea es obtener una serie de gráficos que describan la evolución del bootstrapping en cada una de las redes con los diferentes tamaños de submuestra seleccionados. De este modo, además de ver su evolución, se puede intuir cual es la mejor elección de la cantidad de bootstraps a realizar según un tamaño de muestra dado.
+
+Finalmente, utilzaremos los conocimientos adquiridos en la simulación para aplicarlos a un caso particular. De este modo, podremos probar que los resultados obtenidos son lo suficientemente correctos para poder generalizarlos a los distintos casos que puedan surgir en diferentes estudios científicos.
+
+# Análisis de Resultados de la Simulación
+
+Comenzaremos el análisis de los resultados obtenidos en la simulación sobre las distintas redes creadas con diferentes tamaños de submuestra y los distintos valores de bootstraps.
+
+Antes de continuar, deberemos de cargar, en primer lugar, los datos originales y la correspondiente red dada con todas las muestras.
+
+```{r}
+# Cargamos la base de datos disponible
+expr.data = getExprDataFromTissue(tissue="notad",
+                                  which.one="CoExpROSMAP")
+
+# Cargamos la red
+net = getNetworkFromTissue(which.one="CoExpROSMAP",tissue="notad")
+```
+
+## Submuestra de tamaño 10
+
+Tal y como hemos comentaod en el apartado de metodología comenzaremos estudiando los resultados obtenidos tras la selección arbitraria de una submuestra de tamaño $10$.
+
+El lanzamiento de creación de una red viene dada por el siguiente script, en el que introducimos la creación de una red de $10$ bootstraps.
+
+```{r,eval=FALSE}
+library(CoExpNets)
+library(CoExpROSMAP)
+CoExpROSMAP::initDb()
+library(WGCNA)
+WGCNA::enableWGCNAThreads(6)
+
+# Cargamos la base de datos disponible
+expr.data = getExprDataFromTissue(tissue="notad",
+                                  which.one="CoExpROSMAP")
+
+# Seleccionamos una submuestra de tamaño 190
+set.seed(12345)
+exp.data2 <- expr.data[sample(nrow(expr.data),10),]
+
+start.time1 <- Sys.time()
+# Lanzamos el proceso de creación de la red bootstrap
+set.seed(12345)
+getBootstrapNetwork(mode = "bootstrap",expr.data = exp.data2, 
+                    job.path = "results10/",
+                    removeTOMF = TRUE, blockTOM = TRUE,
+                    annotateFinalNet = TRUE,
+                    b = 10)
+end.time1 <- Sys.time()
+```
+
+Las demás redes las realizamos de la misma forma, sólo tenemos que cambiar el valor de $b$, según el número de bootstrasp que queramos realizar y el `job.path`, creando otra carpeta identificada según el correspondiente número de bootstraps.
+
+Cargamos los archivos obtenidos en la creación de las distintas redes.
+
+```{r}
+net.10.10 <- readRDS("Muestra10/results10/netBootBootstrap.19.it.50.b.10.rds")
+
+net.10.15 <- readRDS("Muestra10/results15/netBootBootstrap.19.it.50.b.15.rds")
+
+net.10.20 <- readRDS("Muestra10/results20/netBootBootstrap.20.it.50.b.20.rds")
+
+net.10.25 <- readRDS("Muestra10/results25/netBootBootstrap.20.it.50.b.25.rds")
+
+net.10.30 <- readRDS("Muestra10/results30/netBootBootstrap.20.it.50.b.30.rds")
+
+net.10.35 <- readRDS("Muestra10/results35/netBootBootstrap.20.it.50.b.35.rds")
+
+net.10.40 <- readRDS("Muestra10/results40/netBootBootstrap.19.it.50.b.40.rds")
+
+net.10.45 <- readRDS("Muestra10/results45/netBootBootstrap.19.it.50.b.45.rds")
+
+net.10.50 <- readRDS("Muestra10/results50/netBootBootstrap.19.it.50.b.50.rds")
+```
+
+### Número de Módulos
+
+En primer lugar vamos a estudiar el tamaño de los módulos sobre cada una de las redes. Para ello, inicialmente, guardamos el tamaño en una variable.
+
+```{r}
+numeroModulos.10 <- c(length(unique(net.10.10$moduleColors)),length(unique(net.10.15$moduleColors)),length(unique(net.10.20$moduleColors)),length(unique(net.10.25$moduleColors)),length(unique(net.10.30$moduleColors)),length(unique(net.10.35$moduleColors)),length(unique(net.10.40$moduleColors)),length(unique(net.10.45$moduleColors)),length(unique(net.10.50$moduleColors)))
+```
+
+Creamos un data frame dónde introducimos, por columnas, el número de módulos y los bootstraps utilizados.
+
+```{r}
+df <- data.frame(bootstraps = c(seq(10,50,5)),NumeroModulos = numeroModulos.10)
+```
+
+Presentamos la sobre un gráfico:
+
+```{r}
+ggplot(df, aes(bootstraps,NumeroModulos))+
+  geom_line(col="red")+
+  labs(title="Evolución del número de módulos por bootstraps", 
+       subtitle="Muestra de tamaño 10",
+       y="Número de módulos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="red")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Entropía de los Módulos
+
+Por otro lado tenemos el concepto de `entropía`. La `entropía de Shannon`, mide la incerdidumbre de una fuente de información. Esta cuantifica el valor esperado de la información contenida en un mensaje. La fórmula, fue introducida por Claude E. Shannon en 1948, en su ensayo `A Mathematical Theory of Communication`. Esta fórmula es lo que se conoce cómo desinformación $H$:
+
+$$
+H(X)=-\sum_{i=1}^np(x_i)log_2 \frac{1}{p(x_i)}
+$$
+
+La base del logaritmo se corresponde con el tipo de preguntas que se realicen. Es decir, si en vez de preguntas binarias, se hiciesen preguntas terniarias, o de algún otor número de respuestas entonces debería de cambiar dicho valor correspondiente a la base del logaritmo. En nuestro caso, usaremos la fórmula tal y cómo está, con un valor $2$ en la base.
+
+La entropía posee una serie de propiedades que enumeramos a continuación:
+
++ Es no negativa, lo que es evidente puesto que estamos trabajando con probabilidades. Además, $log_2 p_i \leq 0$, luego $-log_2 p_i \leq 0$ y se cumple la positividad.
+
++ Si tomamos un proceso con posibles resultados ${A_1,...,A_n}$, cuyas probabilidades correspondientes son $p_1,...,p_n$. La entropía está acotada superiormente, es decir, posee un valor máximo, y este se da en el caso de que se cumpla que $p_1=p_2=...=p_n=\frac{1}{n}$. En este caso, tendríamos la máxima incertidumbre del mensaje, la máxima desinformación, puesto que estamos considerando que los posibles valores de la variable son equiprobables.
+
++ De nuevo, si tomamos un proceso con posibles resultados ${A_1,...,A_n}$, cuyas probabilidades correspondientes son $p_1,...,p_n$. La entropía está igualmente acotada inferiormente. En este caso, este suceso se da si $p_i=0 \forall i$ excepto para una cierta clase $p_j=1$. Al contrario que en el caso anterior, ahora tendríamos la mínima incertidumbre posible, o lo que es lo mismo, la máxima información posible.
+
+En nuestro caso, la entropía viene referida sobre los módulos obtenidos en las distintas redes de co-expresión. Si todos los módulos tienen aproximadamente el mismo número de genes no sería bueno puesto que se asemeja al caso anterior de equiprobabilidad, lo que supondría poca información y mucha incertidumbre en los resultados. 
+
+Sin embargo, el valor de entropía, cómo función en $n$, es creciente, es decir, a mayor valor de $n$ más valor de la entropía. Es por eso que, en nuestro caso, para poder comparar la entropía de las redes bootstraps deberemos de normalizar dicho valor. Para ello, calculamos el valor de la entropía y lo dividimos por el valor máximo que puede tomar según los módulos que tiene la red bootstraps. Por ejemplo, la red gold standard tiene $56$ módulos, su valor máximo se calcula haciendo que todos sus módulos tengan el mismo número de elementos, con poner uno nos vale, de ahí el código que se ve a continuación. Una vez tenemos normalizados los valores ya sí podemos compararlos en una gráfica dónde también mostraremos la entropía de la gold standard para tener una referencia.
+
+```{r}
+entropyGold <- entropy.empirical(table(net$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net$moduleColors))),unit = "log2")
+```
+
+
+```{r}
+entropia.10 <- c(entropy.empirical(table(net.10.10$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.10.10$moduleColors))),unit = "log2"),
+                 entropy.empirical(table(net.10.15$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.10.15$moduleColors))),unit = "log2"),
+                 entropy.empirical(table(net.10.20$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.10.20$moduleColors))),unit = "log2"),
+                 entropy.empirical(table(net.10.25$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.10.25$moduleColors))),unit = "log2"),
+                 entropy.empirical(table(net.10.30$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.10.30$moduleColors))),unit = "log2"),
+                 entropy.empirical(table(net.10.35$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.10.35$moduleColors))),unit = "log2"),
+                 entropy.empirical(table(net.10.40$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.10.40$moduleColors))),unit = "log2"),
+                 entropy.empirical(table(net.10.45$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.10.45$moduleColors))),unit = "log2"),
+                 entropy.empirical(table(net.10.50$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.10.50$moduleColors))),unit = "log2"))
+
+df <- cbind(df, "Entropia"=entropia.10)
+```
+
+```{r}
+ggplot(df, aes(bootstraps,Entropia))+
+  geom_line(col="blue")+
+  labs(title="Evolución del valor de entropía por bootstraps", 
+       subtitle="Muestra de tamaño 10",
+       y="Valor de la Entropía",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  geom_hline(yintercept = entropyGold,col = "red")+
+  theme_gray()
+```
+
+Otro gráfico que podemos realizar, consiste en presentar la evolución, en este caso, de la diferencia de la entropía de una red bootstraps con la entropía de la red gold standard. Para ello, previamente realizaremos esa diferencia cómo podemos ver a continuación.
+
+```{r}
+entropyResta <- df$Entropia-entropyGold
+df$EntropyResta <- entropyResta
+```
+
+Del mismo modo que hemos hecho antes, presentamos la gráfica correspondiente.
+
+```{r}
+ggplot(df, aes(bootstraps,EntropyResta))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la entropía de las redes bootstraps \n restadas por la entropía de la gold standard", 
+       subtitle="Muestra de tamaño 10",
+       y="Entropía de las redes bootstraps menos la gold standard",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Estudio de la conectividad
+
+Otra de las formas de estudiar la calidad de los módulos otorgados por las redes reside en estudiar la conectividad intramodular de cada uno de los módulos. Para ello, el paquete `WGCNA` nos da una función que calcula esos valores. Esta función se llama `intramodularConnectivity.formExpr` y nos devuelve un data.frame con cuatro columnas con diferentes distinciones de conectividad.
+
++ `kTotal`: conectividad de cada gen, basa en sus `r-values`, con los demás genes de la red completa.
+
++ `kWithin`: conectividad de cada gen dentro de su módulo correspondiente, basado en sus r-values, con todos los demás genes dentro del mismo módulo.
+
+Posteriormente, tenemos `kOut` y `kDiff`, que son derivaciones matemáticas de las anteriores. En este caso:
+
++ $kOut = kTotal-kWithin$
+
++ $kDiff = kWithin - kOut$
+
+Para comparar las redes según su conectividad tomaremos la media sobre cada una de las columnas correspondientes y veremos la evolución en la gráfica correspondiente.
+
+```{r}
+expr.data2 <- expr.data[rownames(net.10.10$MEs),]
+```
+
+```{r}
+netGoldConnectivity <- intramodularConnectivity.fromExpr(
+    colors = net$moduleColors,datExpr = expr.data,
+    networkType = "signed")
+
+goldConnect <- apply(netGoldConnectivity, 2, mean)
+goldKWithin <- goldConnect[2]
+```
+
+Realizamos el cálculo sobre la red de $10$ bootstraps.
+
+```{r}
+intra.10.10 <- intramodularConnectivity.fromExpr(colors = net.10.10$moduleColors,datExpr = expr.data2)
+mean.intra.10.10 <- apply(intra.10.10, 2, mean)
+```
+
+Hacemos lo propio con la red de $15$ bootstraps.
+
+```{r}
+intra.10.15 <- intramodularConnectivity.fromExpr(colors = net.10.15$moduleColors,datExpr = expr.data2)
+mean.intra.10.15 <- apply(intra.10.15, 2, mean)
+```
+
+Seguimos con la red de $20$ bootstraps.
+
+```{r}
+intra.10.20 <- intramodularConnectivity.fromExpr(colors = net.10.20$moduleColors,datExpr = expr.data2)
+mean.intra.10.20 <- apply(intra.10.20, 2, mean)
+```
+
+Continuamos con la red de $25$ bootstraps.
+
+```{r}
+intra.10.25 <- intramodularConnectivity.fromExpr(colors = net.10.25$moduleColors,datExpr = expr.data2)
+mean.intra.10.25 <- apply(intra.10.25, 2, mean)
+```
+
+Tomamos ahora la red de $30$ bootstraps.
+
+```{r}
+intra.10.30 <- intramodularConnectivity.fromExpr(colors = net.10.30$moduleColors,datExpr = expr.data2)
+mean.intra.10.30 <- apply(intra.10.30, 2, mean)
+```
+
+Seguimos con la red de $35$ bootstraps.
+
+```{r}
+intra.10.35 <- intramodularConnectivity.fromExpr(colors = net.10.35$moduleColors,datExpr = expr.data2)
+mean.intra.10.35 <- apply(intra.10.35, 2, mean)
+```
+
+Red de $40$ bootstraps.
+
+```{r}
+intra.10.40 <- intramodularConnectivity.fromExpr(colors = net.10.40$moduleColors,datExpr = expr.data2)
+mean.intra.10.40 <- apply(intra.10.40, 2, mean)
+```
+
+Red de $45$ bootstraps.
+
+```{r}
+intra.10.45 <- intramodularConnectivity.fromExpr(colors = net.10.45$moduleColors,datExpr = expr.data2)
+mean.intra.10.45 <- apply(intra.10.45, 2, mean)
+```
+
+Por último, tomamos la red de $50$ bootstraps.
+
+```{r}
+intra.10.50 <- intramodularConnectivity.fromExpr(colors = net.10.50$moduleColors,datExpr = expr.data2)
+mean.intra.10.50 <- apply(intra.10.50, 2, mean)
+```
+
+Una vez tenemos realizados todos los cálculos, guardamos en un mismo vector los valores correspondientes a cada una de las definiciones vistas antes.
+
+```{r}
+ktotal.10 <- c(mean.intra.10.10[1],mean.intra.10.15[1],mean.intra.10.20[1],mean.intra.10.25[1],mean.intra.10.30[1],mean.intra.10.35[1],mean.intra.10.40[1],mean.intra.10.45[1],mean.intra.10.50[1])
+kwithin.10 <- c(mean.intra.10.10[2],mean.intra.10.15[2],mean.intra.10.20[2],mean.intra.10.25[2],mean.intra.10.30[2],mean.intra.10.35[2],mean.intra.10.40[2],mean.intra.10.45[2],mean.intra.10.50[2])
+kout.10 <- c(mean.intra.10.10[3],mean.intra.10.15[3],mean.intra.10.20[3],mean.intra.10.25[3],mean.intra.10.30[3],mean.intra.10.35[3],mean.intra.10.40[3],mean.intra.10.45[3],mean.intra.10.50[3])
+kdiff.10 <- c(mean.intra.10.10[4],mean.intra.10.15[4],mean.intra.10.20[4],mean.intra.10.25[4],mean.intra.10.30[4],mean.intra.10.35[4],mean.intra.10.40[4],mean.intra.10.45[4],mean.intra.10.50[4])
+```
+
+Añadimos las columnas al data frame.
+
+```{r}
+df <- cbind(df,"kTotal" = ktotal.10,"kWithin"=kwithin.10,"kOut"=kout.10,"kDiff"=kdiff.10)
+```
+
+
+<!-- ```{r} -->
+<!-- ggplot(df, aes(bootstraps,kTotal))+ -->
+<!--   geom_line(col="blue")+ -->
+<!--   labs(title="Evolución del valor de kTotal por bootstraps",  -->
+<!--        subtitle="Muestra de tamaño 10", -->
+<!--        y="Valor de kTotal", -->
+<!--        x="Cantidad de Bootstraps", -->
+<!--        color=NULL)+ -->
+<!--   geom_point(size=2,shape=21,fill="white",colour="blue")+ -->
+<!--   scale_x_continuous(breaks = df$bootstraps)+ -->
+<!--   scale_color_manual(labels = c("psavert", "uempmed"),  -->
+<!--                      values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+ -->
+<!--   theme_gray() -->
+<!-- ``` -->
+
+Sin embargo, en nuestro estudio sólo nos quedaremos, en principio, con una de las cuatro definiciones vistas antes. Se trata de `kWithin`, correspondiente a la intraconectividad modular. Para entender bien este conepto y, de este modo, poder interpretar los resultados, deberemos de meternos un poco en el método de `WGCNA`. En dicho método, al construir la red de correlación ponderada, lo que se hace es calcular la correlación de todos los genes dos a dos, elevada a un exponente $\beta$. De este modo, la conectividad de un gen se define cómo la suma de los pesos de todas las aristas que inducen en dicho gen, es decir, la suma de todas las correlaciones de ese gen con el resto de genes. Si hablamos de conectividad intramodular, cómo su nombre indica, sólo se sumarían las correlaciones del gen con el resto de genes del módulo al que pertenecen.
+
+Esto tiene una importancia de la red puesto, que cómo veremos, el conectividad intramodular está muy relacionada con el `Module Membership`. Para verlo mejor, tomaremos la red de $10$ bootstraps y visualizaremos, mediante la función `verboseScatterplot` su relación con el `Module Membership`. Cómo ejemplo, tomaremos un módulo cualquiere, en este caso, se ha seleccionado el módulo `green`.
+
+```{r}
+mm.10.10 = getMM(net = net.10.10, expr.data.file = expr.data2,genes = NULL)
+rownames(intra.10.10) <- colnames(expr.data2)
+intra.10.10$cluster <- net.10.10$moduleColors
+
+verboseScatterplot(intra.10.10$kWithin[which(intra.10.10$cluster == "green")],mm.10.10$mm[which(mm.10.10$module=="green")],col="green",xlab="Intramodular Connectivity",ylab = "Module Membership Green")
+```
+
+Cómo se aprecia en la imagen, la relación, cómo veníamos apuntando, es muy alta. Por lo tanto, un valor de alto de `kWithin` viene determinado por un valor alto de `Module Membership`, luego un valor alto de conectividad intramodular es bueno para la red.
+
+Ahora vemos la evolución de dicho valor según los bootstraps realizados.
+
+```{r}
+ggplot(df, aes(bootstraps,kWithin))+
+  geom_line(col="blue")+
+  labs(title="Evolución del valor de kWithin por bootstraps", 
+       subtitle="Muestra de tamaño 10",
+       y="Valor de kWithin",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+Se puede observar una pequeña relación entre la gráfica anterior y la que hemos mostrado con respecto al número de módulos. Para ver mejor y más claramente cómo varía la conectividad entre los valores de bootstraps lo que haremos será, dadas las redes que tenemos, tomar un índice que varía según el número de módulos. Teniendo la columna correspondiente al número de módulos guardada en el data frame con el que estamos trabajando, lo que haremos será dividir dicha columna por su máximo, y de ahí obtendremos dicho vector al que se lo multiplicaremos a la conectividad. De esta forma, lo que se intenta es hacer algo parecido a la normalización.
+
+```{r}
+indiceTamModulos <- df$NumeroModulos/max(df$NumeroModulos)
+
+df$IndiceTamModulos <- indiceTamModulos
+
+df$ConectividadNormalizada <- df$IndiceTamModulos*df$kWithin
+```
+
+```{r}
+ggplot(df, aes(bootstraps,ConectividadNormalizada))+
+  geom_line(col="blue")+
+  labs(title="Evolución del valor de kWithin normalizada previeamente según el número de módulos", 
+       subtitle="Muestra de tamaño 10",
+       y="Valor de kWithin normalizado según número de módulos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+
+
+<!-- ```{r} -->
+<!-- ggplot(df, aes(bootstraps,kOut))+ -->
+<!--   geom_line(col="blue")+ -->
+<!--   labs(title="Evolución del valor de kOut por bootstraps",  -->
+<!--        subtitle="Muestra de tamaño 10", -->
+<!--        y="Valor de kOut", -->
+<!--        x="Cantidad de Bootstraps", -->
+<!--        color=NULL)+ -->
+<!--   geom_point(size=2,shape=21,fill="white",colour="blue")+ -->
+<!--   scale_x_continuous(breaks = df$bootstraps)+ -->
+<!--   scale_color_manual(labels = c("psavert", "uempmed"),  -->
+<!--                      values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+ -->
+<!--   theme_gray() -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- ggplot(df, aes(bootstraps,kDiff))+ -->
+<!--   geom_line(col="blue")+ -->
+<!--   labs(title="Evolución del valor de kDiff por bootstraps",  -->
+<!--        subtitle="Muestra de tamaño 10", -->
+<!--        y="Valor de kDiff", -->
+<!--        x="Cantidad de Bootstraps", -->
+<!--        color=NULL)+ -->
+<!--   geom_point(size=2,shape=21,fill="white",colour="blue")+ -->
+<!--   scale_x_continuous(breaks = df$bootstraps)+ -->
+<!--   scale_color_manual(labels = c("psavert", "uempmed"),  -->
+<!--                      values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+ -->
+<!--   theme_gray() -->
+<!-- ``` -->
+
+
+
+### Estudio del Índice Rand
+
+Estudiaremos ahora el valor del índice Rand de cada una de las redes bootstraps con respecto a la red gold standard. Este índice estudia la similitud de las redes, se encuentra en el intervalo $[0,1]$, de modo que cuánto más cercano a $1$ más similitud obtenemos.
+
+```{r}
+indiceRand.10 <- c(mclust::adjustedRandIndex(net$moduleColors,net.10.10$moduleColors),
+                   mclust::adjustedRandIndex(net$moduleColors,net.10.15$moduleColors),
+                   mclust::adjustedRandIndex(net$moduleColors,net.10.20$moduleColors),
+                   mclust::adjustedRandIndex(net$moduleColors,net.10.25$moduleColors),
+                   mclust::adjustedRandIndex(net$moduleColors,net.10.30$moduleColors),
+                   mclust::adjustedRandIndex(net$moduleColors,net.10.35$moduleColors),
+                   mclust::adjustedRandIndex(net$moduleColors,net.10.40$moduleColors),
+                   mclust::adjustedRandIndex(net$moduleColors,net.10.45$moduleColors),
+                   mclust::adjustedRandIndex(net$moduleColors,net.10.50$moduleColors))
+```
+
+```{r}
+df <- cbind(df,"indiceRand"=indiceRand.10)
+```
+
+```{r}
+ggplot(df, aes(bootstraps,indiceRand))+
+  geom_line(col="blue")+
+  labs(title="Evolución del valor del índice Rand por bootstraps", 
+       subtitle="Muestra de tamaño 10",
+       y="Similitud de las redes bootstraps con la gold standard",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Estudio de las anotaciones de las redes
+
+```{r}
+goldAnotation <- read.csv("net.GoldSatandard.56_gprof.csv")
+
+anotationGold <- sum(sort(table(goldAnotation$query.number),
+                           decreasing=T))
+
+numberModulesGold <- length(unique(net$moduleColors))
+moduleMeanAnotationGold <- anotationGold/numberModulesGold
+```
+
+Por otro lado, tenemos que estudiar las anotaciones realizadas sobre cada una de las redes, en cuanto a la ontología `Gene Ontology` respecto sus términos de `BP`, `CC` y `MF`. Cuántas más anotaciones se generen, más enriquecida estará nuestra red y más información biológica podremos obtener.
+
+De este modo, calcularemos el total de anotaciones de cada red y representaremos la evolución en el número de bootstraps.
+
+En primer lugar cargamos el fichero de anotaciones.
+
+```{r}
+net.go.10.10 <- read.csv("Muestra10/results10/netBootBootstrap.19.it.50.b.10.rds_gprof.csv")
+net.go.10.15 <- read.csv("Muestra10/results15/netBootBootstrap.19.it.50.b.15.rds_gprof.csv")
+net.go.10.20 <- read.csv("Muestra10/results20/netBootBootstrap.20.it.50.b.20.rds_gprof.csv")
+net.go.10.25 <- read.csv("Muestra10/results25/netBootBootstrap.20.it.50.b.25.rds_gprof.csv")
+net.go.10.30 <- read.csv("Muestra10/results30/netBootBootstrap.20.it.50.b.30.rds_gprof.csv")
+net.go.10.35 <- read.csv("Muestra10/results35/netBootBootstrap.20.it.50.b.35.rds_gprof.csv")
+net.go.10.40 <- read.csv("Muestra10/results40/netBootBootstrap.19.it.50.b.40.rds_gprof.csv")
+net.go.10.45 <- read.csv("Muestra10/results45/netBootBootstrap.19.it.50.b.45.rds_gprof.csv")
+net.go.10.50 <- read.csv("Muestra10/results50/netBootBootstrap.19.it.50.b.50.rds_gprof.csv")
+```
+
+Guardamos en un vector la cantidad de anotacioens de cada red.
+
+```{r}
+anotaciones.10 <- c(sum(sort(table(net.go.10.10$query.number),decreasing=T)),sum(sort(table(net.go.10.15$query.number),decreasing=T)),sum(sort(table(net.go.10.20$query.number),decreasing=T)),sum(sort(table(net.go.10.25$query.number),decreasing=T)),sum(sort(table(net.go.10.30$query.number),decreasing=T)),sum(sort(table(net.go.10.35$query.number),decreasing=T)),sum(sort(table(net.go.10.40$query.number),decreasing=T)),sum(sort(table(net.go.10.45$query.number),decreasing=T)),sum(sort(table(net.go.10.50$query.number),decreasing=T)))
+```
+
+Introducimos la columna en el data frame.
+
+```{r}
+df <- cbind(df,"Anotaciones"=anotaciones.10)
+```
+
+Representamos la gráfica.
+
+```{r}
+ggplot(df, aes(bootstraps,Anotaciones))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la cantidad de anotaciones por bootstraps", 
+       subtitle="Muestra de tamaño 10",
+       y="Cantidad de Anotaciones",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+En la gráfica anterior tenemos el número total de anotaciones de la red. Lo que veremos ahora, será el número medio de anotaciones por módulo. Es decir, a ese tamaño total de anotación de la red bootstrap lo dividiremos según el número de módulos que tienen para conocer dicho valor medio.
+
+```{r}
+df$MediaAnotacionesModulo <- df$Anotaciones/df$NumeroModulos
+```
+
+```{r}
+ggplot(df, aes(bootstraps,MediaAnotacionesModulo))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de anotaciones por módulo según el número de bootstrasp", 
+       subtitle="Muestra de tamaño 10",
+       y="Media de anotaciones por módulo",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Anotació sobre el Tipo de Célula
+
+En esta sección estudiaremos las anotaciones realizadas sobre el tipo de célula en cada una de las redes. Para ello, tomaremos tres medidas de comparación. En primer lugar,  calcularemos cuántos tipos de célula están anotados por la red y visualizaremos la evolución según los bootstraps. A continuación, sumaremos el valor de los $-log(pval)$ de cada una de esas anotaciones, y tomaremos su valor medio para volver a reprentar la evolución en el número de bootstraps. Por último, tomando sólo esos tipos de célula que sí están anotados, veremos con cuántos módulos tienen significancia y calcularemos su media.
+
+```{r,message=FALSE}
+library(gplots)
+```
+
+Comenzamos calculando los valores para la red de 10 bootstraps:
+
+```{r}
+# Anotamos según el tipo de célula
+celltype.net.10.10 <- genAnnotationCellType(which.one="new",net.in=net.10.10,return.processed = F,doheatmap = T)
+# Convertimos a -log(pval)
+celltype.net.10.10 <- -log(celltype.net.10.10)
+# Sumamos por filas para obtener el total de -log(pval) según las anotaciones
+cell.col.10.10 <- apply(celltype.net.10.10, 1, sum)
+# Tomamos sólo aquellos tipos de célula que sí están anotados
+cell.10.10.Anotate <- celltype.net.10.10[which(cell.col.10.10>5),]
+# Sumamos por filas para obtener el total de -log(pval) sólo de aquellos tipos que sean significativos
+cell.10.10.Anotate.Sum <- apply(cell.10.10.Anotate,1,sum)
+# El total de tipo anotados viene determinado por las filas de la matriz anterior
+celltype.anotate.10.10 <- nrow(cell.10.10.Anotate)
+```
+
+
+```{r}
+# Con el siguiente bucle sabremos cuantos módulos tienen significancia con cada una de las anotaciones realizadas sobre los tipos de célula.
+count.10.10=c()
+for(i in 1:nrow(cell.10.10.Anotate)){
+  t=0
+  for(j in 1:ncol(cell.10.10.Anotate)){
+    if(cell.10.10.Anotate[i,j]>0){
+      t=t+1
+    } else next
+  }
+  count.10.10=c(count.10.10,t)
+}
+```
+
+
+Red de 15 bootstraps:
+
+```{r}
+# Anotamos según el tipo de célula
+celltype.net.10.15 <- genAnnotationCellType(which.one="new",net.in=net.10.15,return.processed = F,doheatmap = T)
+# Convertimos a -log(pval)
+celltype.net.10.15 <- -log(celltype.net.10.15)
+# Sumamos por filas para obtener el total de -log(pval) según las anotaciones
+cell.col.10.15 <- apply(celltype.net.10.15, 1, sum)
+# Tomamos sólo aquellos tipos de célula que sí están anotados
+cell.10.15.Anotate <- celltype.net.10.15[which(cell.col.10.15>5),]
+# Sumamos por filas para obtener el total de -log(pval) sólo de aquellos tipos que sean significativos
+cell.10.15.Anotate.Sum <- apply(cell.10.15.Anotate,1,sum)
+# El total de tipo anotados viene determinado por las filas de la matriz anterior
+celltype.anotate.10.15 <- nrow(cell.10.15.Anotate)
+```
+
+
+```{r}
+# Con el siguiente bucle sabremos cuantos módulos tienen significancia con cada una de las anotaciones realizadas sobre los tipos de célula.
+count.10.15=c()
+for(i in 1:nrow(cell.10.15.Anotate)){
+  t=0
+  for(j in 1:ncol(cell.10.15.Anotate)){
+    if(cell.10.15.Anotate[i,j]>0){
+      t=t+1
+    } else next
+  }
+  count.10.15=c(count.10.15,t)
+}
+```
+
+Red de 20 bootstraps:
+
+```{r}
+# Anotamos según el tipo de célula
+celltype.net.10.20 <- genAnnotationCellType(which.one="new",net.in=net.10.20,return.processed = F,doheatmap = T)
+# Convertimos a -log(pval)
+celltype.net.10.20 <- -log(celltype.net.10.20)
+# Sumamos por filas para obtener el total de -log(pval) según las anotaciones
+cell.col.10.20 <- apply(celltype.net.10.20, 1, sum)
+# Tomamos sólo aquellos tipos de célula que sí están anotados
+cell.10.20.Anotate <- celltype.net.10.20[which(cell.col.10.20>5),]
+# Sumamos por filas para obtener el total de -log(pval) sólo de aquellos tipos que sean significativos
+cell.10.20.Anotate.Sum <- apply(cell.10.20.Anotate,1,sum)
+# El total de tipo anotados viene determinado por las filas de la matriz anterior
+celltype.anotate.10.20 <- nrow(cell.10.20.Anotate)
+```
+
+
+```{r}
+# Con el siguiente bucle sabremos cuantos módulos tienen significancia con cada una de las anotaciones realizadas sobre los tipos de célula.
+count.10.20=c()
+for(i in 1:nrow(cell.10.20.Anotate)){
+  t=0
+  for(j in 1:ncol(cell.10.20.Anotate)){
+    if(cell.10.20.Anotate[i,j]>0){
+      t=t+1
+    } else next
+  }
+  count.10.20=c(count.10.20,t)
+}
+```
+
+Red de 25 bootstraps:
+
+```{r}
+# Anotamos según el tipo de célula
+celltype.net.10.25 <- genAnnotationCellType(which.one="new",net.in=net.10.25,return.processed = F,doheatmap = T)
+# Convertimos a -log(pval)
+celltype.net.10.25 <- -log(celltype.net.10.25)
+# Sumamos por filas para obtener el total de -log(pval) según las anotaciones
+cell.col.10.25 <- apply(celltype.net.10.25, 1, sum)
+# Tomamos sólo aquellos tipos de célula que sí están anotados
+cell.10.25.Anotate <- celltype.net.10.25[which(cell.col.10.25>5),]
+# Sumamos por filas para obtener el total de -log(pval) sólo de aquellos tipos que sean significativos
+cell.10.25.Anotate.Sum <- apply(cell.10.25.Anotate,1,sum)
+# El total de tipo anotados viene determinado por las filas de la matriz anterior
+celltype.anotate.10.25 <- nrow(cell.10.25.Anotate)
+```
+
+
+```{r}
+# Con el siguiente bucle sabremos cuantos módulos tienen significancia con cada una de las anotaciones realizadas sobre los tipos de célula.
+count.10.25=c()
+for(i in 1:nrow(cell.10.25.Anotate)){
+  t=0
+  for(j in 1:ncol(cell.10.25.Anotate)){
+    if(cell.10.25.Anotate[i,j]>0){
+      t=t+1
+    } else next
+  }
+  count.10.25=c(count.10.25,t)
+}
+```
+
+Red de 30 bootstraps:
+
+```{r}
+# Anotamos según el tipo de célula
+celltype.net.10.30 <- genAnnotationCellType(which.one="new",net.in=net.10.30,return.processed = F,doheatmap = T)
+# Convertimos a -log(pval)
+celltype.net.10.30 <- -log(celltype.net.10.30)
+# Sumamos por filas para obtener el total de -log(pval) según las anotaciones
+cell.col.10.30 <- apply(celltype.net.10.30, 1, sum)
+# Tomamos sólo aquellos tipos de célula que sí están anotados
+cell.10.30.Anotate <- celltype.net.10.30[which(cell.col.10.30>5),]
+# Sumamos por filas para obtener el total de -log(pval) sólo de aquellos tipos que sean significativos
+cell.10.30.Anotate.Sum <- apply(cell.10.30.Anotate,1,sum)
+# El total de tipo anotados viene determinado por las filas de la matriz anterior
+celltype.anotate.10.30 <- nrow(cell.10.30.Anotate)
+```
+
+
+```{r}
+# Con el siguiente bucle sabremos cuantos módulos tienen significancia con cada una de las anotaciones realizadas sobre los tipos de célula.
+count.10.30=c()
+for(i in 1:nrow(cell.10.30.Anotate)){
+  t=0
+  for(j in 1:ncol(cell.10.30.Anotate)){
+    if(cell.10.30.Anotate[i,j]>0){
+      t=t+1
+    } else next
+  }
+  count.10.30=c(count.10.30,t)
+}
+```
+
+Red de 35 bootstraps:
+
+```{r}
+# Anotamos según el tipo de célula
+celltype.net.10.35 <- genAnnotationCellType(which.one="new",net.in=net.10.35,return.processed = F,doheatmap = T)
+# Convertimos a -log(pval)
+celltype.net.10.35 <- -log(celltype.net.10.35)
+# Sumamos por filas para obtener el total de -log(pval) según las anotaciones
+cell.col.10.35 <- apply(celltype.net.10.35, 1, sum)
+# Tomamos sólo aquellos tipos de célula que sí están anotados
+cell.10.35.Anotate <- celltype.net.10.35[which(cell.col.10.35>5),]
+# Sumamos por filas para obtener el total de -log(pval) sólo de aquellos tipos que sean significativos
+cell.10.35.Anotate.Sum <- apply(cell.10.35.Anotate,1,sum)
+# El total de tipo anotados viene determinado por las filas de la matriz anterior
+celltype.anotate.10.35 <- nrow(cell.10.35.Anotate)
+```
+
+
+```{r}
+# Con el siguiente bucle sabremos cuantos módulos tienen significancia con cada una de las anotaciones realizadas sobre los tipos de célula.
+count.10.35=c()
+for(i in 1:nrow(cell.10.35.Anotate)){
+  t=0
+  for(j in 1:ncol(cell.10.35.Anotate)){
+    if(cell.10.35.Anotate[i,j]>0){
+      t=t+1
+    } else next
+  }
+  count.10.35=c(count.10.35,t)
+}
+```
+
+Red de 40 bootstraps:
+
+```{r}
+# Anotamos según el tipo de célula
+celltype.net.10.40 <- genAnnotationCellType(which.one="new",net.in=net.10.40,return.processed = F,doheatmap = T)
+# Convertimos a -log(pval)
+celltype.net.10.40 <- -log(celltype.net.10.40)
+# Sumamos por filas para obtener el total de -log(pval) según las anotaciones
+cell.col.10.40 <- apply(celltype.net.10.40, 1, sum)
+# Tomamos sólo aquellos tipos de célula que sí están anotados
+cell.10.40.Anotate <- celltype.net.10.40[which(cell.col.10.40>5),]
+# Sumamos por filas para obtener el total de -log(pval) sólo de aquellos tipos que sean significativos
+cell.10.40.Anotate.Sum <- apply(cell.10.40.Anotate,1,sum)
+# El total de tipo anotados viene determinado por las filas de la matriz anterior
+celltype.anotate.10.40 <- nrow(cell.10.40.Anotate)
+```
+
+
+```{r}
+# Con el siguiente bucle sabremos cuantos módulos tienen significancia con cada una de las anotaciones realizadas sobre los tipos de célula.
+count.10.40=c()
+for(i in 1:nrow(cell.10.40.Anotate)){
+  t=0
+  for(j in 1:ncol(cell.10.40.Anotate)){
+    if(cell.10.40.Anotate[i,j]>0){
+      t=t+1
+    } else next
+  }
+  count.10.40=c(count.10.40,t)
+}
+```
+
+Red de 45 bootstraps.
+
+```{r}
+# Anotamos según el tipo de célula
+celltype.net.10.45 <- genAnnotationCellType(which.one="new",net.in=net.10.45,return.processed = F,doheatmap = T)
+# Convertimos a -log(pval)
+celltype.net.10.45 <- -log(celltype.net.10.45)
+# Sumamos por filas para obtener el total de -log(pval) según las anotaciones
+cell.col.10.45 <- apply(celltype.net.10.45, 1, sum)
+# Tomamos sólo aquellos tipos de célula que sí están anotados
+cell.10.45.Anotate <- celltype.net.10.45[which(cell.col.10.45>5),]
+# Sumamos por filas para obtener el total de -log(pval) sólo de aquellos tipos que sean significativos
+cell.10.45.Anotate.Sum <- apply(cell.10.45.Anotate,1,sum)
+# El total de tipo anotados viene determinado por las filas de la matriz anterior
+celltype.anotate.10.45 <- nrow(cell.10.45.Anotate)
+```
+
+
+```{r}
+# Con el siguiente bucle sabremos cuantos módulos tienen significancia con cada una de las anotaciones realizadas sobre los tipos de célula.
+count.10.45=c()
+for(i in 1:nrow(cell.10.45.Anotate)){
+  t=0
+  for(j in 1:ncol(cell.10.45.Anotate)){
+    if(cell.10.45.Anotate[i,j]>0){
+      t=t+1
+    } else next
+  }
+  count.10.45=c(count.10.45,t)
+}
+```
+
+Red de 50 bootstraps.
+
+```{r}
+# Anotamos según el tipo de célula
+celltype.net.10.50 <- genAnnotationCellType(which.one="new",net.in=net.10.50,return.processed = F,doheatmap = T)
+# Convertimos a -log(pval)
+celltype.net.10.50 <- -log(celltype.net.10.50)
+# Sumamos por filas para obtener el total de -log(pval) según las anotaciones
+cell.col.10.50 <- apply(celltype.net.10.50, 1, sum)
+# Tomamos sólo aquellos tipos de célula que sí están anotados
+cell.10.50.Anotate <- celltype.net.10.50[which(cell.col.10.50>5),]
+# Sumamos por filas para obtener el total de -log(pval) sólo de aquellos tipos que sean significativos
+cell.10.50.Anotate.Sum <- apply(cell.10.50.Anotate,1,sum)
+# El total de tipo anotados viene determinado por las filas de la matriz anterior
+celltype.anotate.10.50 <- nrow(cell.10.50.Anotate)
+```
+
+
+```{r}
+# Con el siguiente bucle sabremos cuantos módulos tienen significancia con cada una de las anotaciones realizadas sobre los tipos de célula.
+count.10.50=c()
+for(i in 1:nrow(cell.10.50.Anotate)){
+  t=0
+  for(j in 1:ncol(cell.10.50.Anotate)){
+    if(cell.10.50.Anotate[i,j]>0){
+      t=t+1
+    } else next
+  }
+  count.10.50=c(count.10.50,t)
+}
+```
+
+
+Realizamos las gráficas:
+
+En primer lugar introducimos la cantidad de tipos de célula que han sido significativos.
+
+```{r}
+countCellAnotate.10 <- c(celltype.anotate.10.10,celltype.anotate.10.15,celltype.anotate.10.20,celltype.anotate.10.25,celltype.anotate.10.30,celltype.anotate.10.35,celltype.anotate.10.40,celltype.anotate.10.45,celltype.anotate.10.50)
+
+df <- cbind(df,"CountCellAnotate" = countCellAnotate.10)
+```
+
+
+```{r}
+ggplot(df, aes(bootstraps,CountCellAnotate))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la cantidad de tipos de células significativos", 
+       subtitle="Muestra de tamaño 10",
+       y="Número de tipos de células significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+A continuación, por cada una de ese tipo celular anotado, hemos sumado la cantidad de $-log(pval)$. Ahora tomamos la media de cada uno de los vectores de las redes y representamos su evolución.
+
+```{r}
+meanCellLog.Anotate.10 <- c(mean(cell.10.10.Anotate.Sum),mean(cell.10.15.Anotate.Sum),mean(cell.10.20.Anotate.Sum),mean(cell.10.25.Anotate.Sum),mean(cell.10.30.Anotate.Sum),mean(cell.10.35.Anotate.Sum),mean(cell.10.40.Anotate.Sum),mean(cell.10.45.Anotate.Sum),mean(cell.10.50.Anotate.Sum))
+
+df <- cbind(df, "meanCellLogAnotate" = meanCellLog.Anotate.10)
+```
+
+```{r}
+ggplot(df, aes(bootstraps,meanCellLogAnotate))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de -log(pval) según los tipos significativos", 
+       subtitle="Media de -log(pval) por tipo de célula significativo",
+       y="Número de tipos de células significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+Por último, tomando también sólo aquellos tipos de célula anotados, veremos la media de los módulos con los que son significantes.
+
+```{r}
+meanModuleCellSignificance <- c(mean(count.10.10),mean(count.10.15),mean(count.10.20),mean(count.10.25),mean(count.10.30),mean(count.10.35),mean(count.10.40),mean(count.10.45),mean(count.10.50))
+
+df <- cbind(df, "meanModuleCellSignificance" = meanModuleCellSignificance)
+```
+
+```{r}
+ggplot(df, aes(bootstraps,meanModuleCellSignificance))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de módulos significantes con los tipos de célula significativos", 
+       subtitle="Media de módulos significantes",
+       y="Número de tipos de células significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Estudio de los overlaps según MM
+
+Por último, la función `genCrossTabPlot` nos permite sacar un mapa de calor con los overlaps entre los módulos de una red bootstraps y la red gold standard. 
+
+```{r,echo=FALSE}
+genCrossTabPlot <- function(colors1,
+                            colors2,
+                            tissue1="Net 1",
+                            tissue2="Net 2",
+                            plot.file=NULL){
+
+  #We create a simple crosstab
+  XTbl <- overlapTable(colors1, colors2)
+  XTbl$pTable[] = p.adjust(XTbl$pTable,method="fdr")
+  toreturn = XTbl$pTable
+  #print(XTbl)
+  # Truncate p values smaller than 10^(-50) to 10^(-50)
+  XTbl$pTable <- -log10(XTbl$pTable)
+  #XTbl$pTable[is.infinite(XTbl$pTable)] = 1.3*max(XTbl$pTable[is.finite(XTbl$pTable)])
+  XTbl$pTable[XTbl$pTable>50 ] = 50
+
+  # Marginal counts (really module sizes)
+  ModTotals.1 = apply(XTbl$countTable, 1, sum)
+  ModTotals.2 = apply(XTbl$countTable, 2, sum)
+  if(!is.null(plot.file)){
+    pdf(plot.file,height=14,width=18)
+    print(paste0("Saving new plot ",plot.file))
+
+  }
+  par(mar=c(15, 12, 2.7, 1)+0.4)
+
+  # Use function labeledHeatmap to produce the color-coded table
+  #with all the trimmings
+  labeledHeatmap(Matrix = XTbl$pTable,
+                 yLabels = paste(" ", names(ModTotals.1)),xLabels = paste(" ",
+                                                                          names(ModTotals.2)),colorLabels = TRUE,
+                 textMatrix =XTbl$countTable,colors = greenWhiteRed(100)[50:100],
+                 ySymbols = paste(names(ModTotals.1)," : ", ModTotals.1, sep=""),
+                 xSymbols = paste(names(ModTotals.2)," : ", ModTotals.2, sep=""),
+                 main = paste0("Correspondence of ", tissue1," (rows) and ", tissue2, " (columns) modules",sep=""),
+                 cex.text = 0.8, cex.lab = 1.0, setStdMargins = FALSE, plotLegend= TRUE)
+  if(!is.null(plot.file))
+    dev.off()
+  return(toreturn)
+}
+```
+
+Podemos utilizar, por ejemplo la red de $10$ bootstraps para ver la gráfica que nos devuelve la función.
+
+```{r,fig.width=20,fig.height=20}
+genCrossTabPlot(net.10.10$moduleColors, net$moduleColors)
+```
+
+En las filas podemos apreciar los módulos correspondientes a la red bootstraps, y en las columnas los módulos pertenecientes a la red standard. Del mismo modo, se nos muestra una tabla con los p-valores de los overlaps, que se corresponden con la escala de color del heatmap.
+
+Ahora bien, en nuestro caso, lo que necesitaremos será algún tipo de indicador que nos permita comparar esos overlaps entre las redes según el número de bootstraps. Para ello, vamos a sacar tres indicadores, que plotearemos en sus correspondientes gráficas según los bootstraps utilizados tal y cómo hemos hecho en casos anteriores.
+
+En primer lugar, calcularemos el número medio de módulos, en la gold standard, en los que aparecen genes de cada módulo de la red bootstraps. Es decir, por cada módulo de la red bootstraps contaremos el número de módulos de la gold standard que se encuentran significativos y, finalmente, tomares la media de esto.
+
+Red de 10 bootstraps:
+
+```{r}
+XTbl.10 <- overlapTable(net$moduleColors, net.10.10$moduleColors)
+XTbl.10$pTable[] = p.adjust(XTbl.10$pTable,method="fdr")
+```
+
+```{r}
+nM.10 <- c()
+logSig.10 <- c()
+for(j in 1:ncol(XTbl.10$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTbl.10$pTable)){
+    if(XTbl.10$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTbl.10$pTable[i,j])
+    } else next
+  }
+  nM.10 <- c(nM.10,count)
+  logSig.10 <- c(logSig.10,log)
+}
+```
+
+Red de 15 bootstraps:
+
+```{r}
+XTbl.15 <- overlapTable(net$moduleColors, net.10.15$moduleColors)
+XTbl.15$pTable[] = p.adjust(XTbl.15$pTable,method="fdr")
+```
+
+```{r}
+nM.15 <- c()
+logSig.15 <- c()
+for(j in 1:ncol(XTbl.15$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTbl.15$pTable)){
+    if(XTbl.15$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTbl.15$pTable[i,j])
+    } else next
+  }
+  nM.15 <- c(nM.15,count)
+  logSig.15 <- c(logSig.15,log)
+}
+```
+
+Red de 20 bootstraps:
+
+```{r}
+XTbl.20 <- overlapTable(net$moduleColors, net.10.20$moduleColors)
+XTbl.20$pTable[] = p.adjust(XTbl.20$pTable,method="fdr")
+```
+
+```{r}
+nM.20 <- c()
+logSig.20 <- c()
+for(j in 1:ncol(XTbl.20$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTbl.20$pTable)){
+    if(XTbl.20$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTbl.20$pTable[i,j])
+    } else next
+  }
+  nM.20 <- c(nM.20,count)
+  logSig.20 <- c(logSig.20,log)
+}
+```
+
+Red de 25 bootstraps:
+
+```{r}
+XTbl.25 <- overlapTable(net$moduleColors, net.10.25$moduleColors)
+XTbl.25$pTable[] = p.adjust(XTbl.25$pTable,method="fdr")
+```
+
+```{r}
+nM.25 <- c()
+logSig.25 <- c()
+for(j in 1:ncol(XTbl.25$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTbl.25$pTable)){
+    if(XTbl.25$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTbl.25$pTable[i,j])
+    } else next
+  }
+  nM.25 <- c(nM.25,count)
+  logSig.25 <- c(logSig.25,log)
+}
+```
+
+Red de 30 bootstraps:
+
+```{r}
+XTbl.30 <- overlapTable(net$moduleColors, net.10.30$moduleColors)
+XTbl.30$pTable[] = p.adjust(XTbl.30$pTable,method="fdr")
+```
+
+```{r}
+nM.30 <- c()
+logSig.30 <- c()
+for(j in 1:ncol(XTbl.30$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTbl.30$pTable)){
+    if(XTbl.30$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTbl.30$pTable[i,j])
+    } else next
+  }
+  nM.30 <- c(nM.30,count)
+  logSig.30 <- c(logSig.30,log)
+}
+```
+
+Red de 35 bootstraps:
+
+```{r}
+XTbl.35 <- overlapTable(net$moduleColors, net.10.35$moduleColors)
+XTbl.35$pTable[] = p.adjust(XTbl.35$pTable,method="fdr")
+```
+
+```{r}
+nM.35 <- c()
+logSig.35 <- c()
+for(j in 1:ncol(XTbl.35$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTbl.35$pTable)){
+    if(XTbl.35$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTbl.35$pTable[i,j])
+    } else next
+  }
+  nM.35 <- c(nM.35,count)
+  logSig.35 <- c(logSig.35,log)
+}
+```
+
+Red de 40 bootstraps:
+
+```{r}
+XTbl.40 <- overlapTable(net$moduleColors, net.10.40$moduleColors)
+XTbl.40$pTable[] = p.adjust(XTbl.40$pTable,method="fdr")
+```
+
+```{r}
+nM.40 <- c()
+logSig.40 <- c()
+for(j in 1:ncol(XTbl.40$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTbl.40$pTable)){
+    if(XTbl.40$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTbl.40$pTable[i,j])
+    } else next
+  }
+  nM.40 <- c(nM.40,count)
+  logSig.40 <- c(logSig.40,log)
+}
+```
+
+Red de 45 bootstraps:
+
+```{r}
+XTbl.45 <- overlapTable(net$moduleColors, net.10.45$moduleColors)
+XTbl.45$pTable[] = p.adjust(XTbl.45$pTable,method="fdr")
+```
+
+```{r}
+nM.45 <- c()
+logSig.45 <- c()
+for(j in 1:ncol(XTbl.45$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTbl.45$pTable)){
+    if(XTbl.45$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTbl.45$pTable[i,j])
+    } else next
+  }
+  nM.45 <- c(nM.45,count)
+  logSig.45 <- c(logSig.45,log)
+}
+```
+
+Red de 50 bootstraps:
+
+```{r}
+XTbl.50 <- overlapTable(net$moduleColors, net.10.50$moduleColors)
+XTbl.50$pTable[] = p.adjust(XTbl.50$pTable,method="fdr")
+```
+
+```{r}
+nM.50 <- c()
+logSig.50 <- c()
+for(j in 1:ncol(XTbl.50$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTbl.50$pTable)){
+    if(XTbl.50$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTbl.50$pTable[i,j])
+    } else next
+  }
+  nM.50 <- c(nM.50,count)
+  logSig.50 <- c(logSig.50,log)
+}
+```
+
+Guardamos la media de cada uno de los anteriores vectores y la introducimos en el data frame:
+
+```{r}
+meanOverlap <- c(mean(nM.10),mean(nM.15),mean(nM.20),mean(nM.25),mean(nM.30),mean(nM.35),mean(nM.40),mean(nM.45),mean(nM.50))
+
+df <- cbind(df,"meanOverlap" = meanOverlap)
+```
+
+```{r}
+ggplot(df, aes(bootstraps,meanOverlap))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media del número de módulos significativos según los overlaps con la gold standard", 
+       subtitle="Muestra de tamaño 10",
+       y="Media de módulos significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+Ahora, lo que trataremos es de calcular algo así cómo el valor medio del $-log(pvalue)$ de la tabla correspondiente al overlap que hemos introducido en el ejemplo. Vemos la ejecución paso por paso.
+
+En primer lugar, realizamos la conversión de los p-valores.
+
+```{r}
+XTbl.10$pTable <- -log10(XTbl.10$pTable)
+XTbl.15$pTable <- -log10(XTbl.15$pTable)
+XTbl.20$pTable <- -log10(XTbl.20$pTable)
+XTbl.25$pTable <- -log10(XTbl.25$pTable)
+XTbl.30$pTable <- -log10(XTbl.30$pTable)
+XTbl.35$pTable <- -log10(XTbl.35$pTable)
+XTbl.40$pTable <- -log10(XTbl.40$pTable)
+XTbl.45$pTable <- -log10(XTbl.45$pTable)
+XTbl.50$pTable <- -log10(XTbl.50$pTable)
+```
+
+Esta tabla, tiene en sus columnas los módulos de la red gold standard, entonces lo que haremos será aplicar la función `apply` para sumar por columnas. De este modo, lo que tenemos es la cantidad de $-log(pvalue)$ que posee cada módulo de la red gold standard.
+
+```{r}
+meanSumLogOverlap.10 <- apply(XTbl.10$pTable,2,sum)
+meanSumLogOverlap.15 <- apply(XTbl.15$pTable,2,sum)
+meanSumLogOverlap.20 <- apply(XTbl.20$pTable,2,sum)
+meanSumLogOverlap.25 <- apply(XTbl.25$pTable,2,sum)
+meanSumLogOverlap.30 <- apply(XTbl.30$pTable,2,sum)
+meanSumLogOverlap.35 <- apply(XTbl.35$pTable,2,sum)
+meanSumLogOverlap.40 <- apply(XTbl.40$pTable,2,sum)
+meanSumLogOverlap.45 <- apply(XTbl.45$pTable,2,sum)
+meanSumLogOverlap.50 <- apply(XTbl.50$pTable,2,sum)
+```
+
+Por último, tomamos la media de los vectores anteriores, la guardamos en un nuevo vector e introducimos la columna en el data frame.
+
+```{r}
+sumLogOverlap <- c(mean(meanSumLogOverlap.10),mean(meanSumLogOverlap.15),mean(meanSumLogOverlap.20),mean(meanSumLogOverlap.25),mean(meanSumLogOverlap.30),mean(meanSumLogOverlap.35),mean(meanSumLogOverlap.40),mean(meanSumLogOverlap.45),mean(meanSumLogOverlap.50))
+
+meanLogOverlapSignificance <- c(mean(logSig.10),mean(logSig.15),mean(logSig.20),mean(logSig.25),mean(logSig.30),mean(logSig.35),mean(logSig.40),mean(logSig.45),mean(logSig.50))
+
+df <- cbind(df, "SumLogOverlap" = sumLogOverlap, "MeanLogOverlapSig" = meanLogOverlapSignificance)
+```
+
+```{r}
+ggplot(df, aes(bootstraps,sumLogOverlap))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de -log(pval) de la tabla de Overlaps", 
+       subtitle="Muestra de tamaño 10",
+       y="Valor medio de -log(pval)",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df, aes(bootstraps,MeanLogOverlapSig))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de -log(pval) de la tabla de Overlaps", 
+       subtitle="Muestra de tamaño 10",
+       y="Valor medio de -log(pval), sólo overlaps significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+
+Con estas dos gráficas iniciales, lo que tenemos es, el número medio de módulos de la red bootstraps significativos con la red standard y el valor medio de $-log(pval)$ que tienen los módulos de la red standard. Es decir, cúanto es el valor total de $-log(pval)$ de un módulo de la red standard y en cuántos módulos de la red bootstraps se extiende ese valor.
+
+Cómo último indicador, vamos a calcular el porcentaje de genes de la red bootstraps que están en una celda con un p-valor significativo.
+
+Red de 10 bootstras:
+
+```{r}
+PercentOverlap.10 <- c()
+for(j in 1:ncol(XTbl.10$pTable)){
+  for(i in 1:nrow(XTbl.10$pTable)){
+    if(XTbl.10$pTable[i,j] < 0.05){
+    PercentOverlap.10 <- c(PercentOverlap.10,XTbl.10$countTable[i,j])
+    } else next
+  }
+}
+```
+
+Red de 15 bootstras:
+
+```{r}
+PercentOverlap.15 <- c()
+for(j in 1:ncol(XTbl.15$pTable)){
+  for(i in 1:nrow(XTbl.15$pTable)){
+    if(XTbl.15$pTable[i,j] < 0.05){
+    PercentOverlap.15 <- c(PercentOverlap.15,XTbl.15$countTable[i,j])
+    } else next
+  }
+}
+```
+
+Red de 20 bootstras:
+
+```{r}
+PercentOverlap.20 <- c()
+for(j in 1:ncol(XTbl.20$pTable)){
+  for(i in 1:nrow(XTbl.20$pTable)){
+    if(XTbl.20$pTable[i,j] < 0.05){
+    PercentOverlap.20 <- c(PercentOverlap.20,XTbl.20$countTable[i,j])
+    } else next
+  }
+}
+```
+
+Red de 25 bootstras:
+
+```{r}
+PercentOverlap.25 <- c()
+for(j in 1:ncol(XTbl.25$pTable)){
+  for(i in 1:nrow(XTbl.25$pTable)){
+    if(XTbl.25$pTable[i,j] < 0.05){
+    PercentOverlap.25 <- c(PercentOverlap.25,XTbl.25$countTable[i,j])
+    } else next
+  }
+}
+```
+
+Red de 30 bootstras:
+
+```{r}
+PercentOverlap.30 <- c()
+for(j in 1:ncol(XTbl.30$pTable)){
+  for(i in 1:nrow(XTbl.30$pTable)){
+    if(XTbl.30$pTable[i,j] < 0.05){
+    PercentOverlap.30 <- c(PercentOverlap.30,XTbl.30$countTable[i,j])
+    } else next
+  }
+}
+```
+
+Red de 35 bootstras:
+
+```{r}
+PercentOverlap.35 <- c()
+for(j in 1:ncol(XTbl.35$pTable)){
+  for(i in 1:nrow(XTbl.35$pTable)){
+    if(XTbl.35$pTable[i,j] < 0.05){
+    PercentOverlap.35 <- c(PercentOverlap.35,XTbl.35$countTable[i,j])
+    } else next
+  }
+}
+```
+
+Red de 40 bootstraps:
+
+```{r}
+PercentOverlap.40 <- c()
+for(j in 1:ncol(XTbl.40$pTable)){
+  for(i in 1:nrow(XTbl.40$pTable)){
+    if(XTbl.40$pTable[i,j] < 0.05){
+    PercentOverlap.40 <- c(PercentOverlap.40,XTbl.40$countTable[i,j])
+    } else next
+  }
+}
+```
+
+Red de 45 bootstraps:
+
+```{r}
+PercentOverlap.45 <- c()
+for(j in 1:ncol(XTbl.45$pTable)){
+  for(i in 1:nrow(XTbl.45$pTable)){
+    if(XTbl.45$pTable[i,j] < 0.05){
+    PercentOverlap.45 <- c(PercentOverlap.45,XTbl.45$countTable[i,j])
+    } else next
+  }
+}
+```
+
+Red de 50 bootstraps:
+
+```{r}
+PercentOverlap.50 <- c()
+for(j in 1:ncol(XTbl.50$pTable)){
+  for(i in 1:nrow(XTbl.50$pTable)){
+    if(XTbl.50$pTable[i,j] < 0.05){
+    PercentOverlap.50 <- c(PercentOverlap.50,XTbl.50$countTable[i,j])
+    } else next
+  }
+}
+```
+
+Calculamos el porcentaje de cada una y lo introducimos en el data frame.
+
+```{r}
+percentOverlap <- c(sum(PercentOverlap.10)/ncol(expr.data),sum(PercentOverlap.15)/ncol(expr.data),sum(PercentOverlap.20)/ncol(expr.data),sum(PercentOverlap.25)/ncol(expr.data),sum(PercentOverlap.30)/ncol(expr.data),sum(PercentOverlap.35)/ncol(expr.data),sum(PercentOverlap.40)/ncol(expr.data),sum(PercentOverlap.45)/ncol(expr.data),sum(PercentOverlap.50)/ncol(expr.data))*100
+
+df <- cbind(df, "PercentOverlap" = percentOverlap)
+```
+
+
+```{r}
+ggplot(df, aes(bootstraps,PercentOverlap))+
+  geom_line(col="blue")+
+  labs(title="Evolución del porcentaje de genes de la red bootstraps situados en una celda significagiva", 
+       subtitle="Muestra de tamaño 10",
+       y="Porcentaje de las redes",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df$bootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+
+
+
+# Unificación del estudio de estadísticos en una única función
+
+Creamos una función de tal modo que, dada una red bootstraps nos calcule los estadísticos anteriormente vistos. Para ello, deberemos introducir, la red bootstraps correspondiente, junto con la gold standard compararitva, necesaria para algunos estadísticos. Por otro lado, cómo es obvio, la matriz de expresión con la que se haya realizado la red bootstraps. Por último, también se deberá incluir las anotaciones realizadas sobre la red, sin embargo, en el caso de no tenerlas se tiene que poner `anotation = FALSE`, para que la propia función haga las anotaciones.
+
+```{r}
+getStatisticsNet <- function(net,netBoot,netBootAnotation,expr.data2,anotation = TRUE,entropyGold=T){
+  numberBootstras <- length(netBoot$subnets)
+  
+  # Guardamos el número de bootstraps realizados
+  netStatistics <- c(numberBootstras)
+  
+  # Calculamos el número de módulos de la red
+  numberModules <- length(unique(netBoot$moduleColors))
+  
+  # Cálculo de la entropía
+  entropyNetBoot <- entropy.empirical(table(netBoot$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(netBoot$moduleColors))),unit = "log2")
+  if(entropyGold)
+    entropyGoldStandard <- entropy.empirical(table(net$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net$moduleColors))),unit = "log2")
+  entropyNormalise <- entropyNetBoot-entropyGoldStandard
+  
+  # Cálculo de la conectividad
+  intraNet <- intramodularConnectivity.fromExpr(
+    colors = netBoot$moduleColors,datExpr = expr.data2,networkType = "signed")
+  mean.intraNet <- apply(intraNet, 2, mean)
+  kTotalNet <- mean.intraNet[1]
+  kWithinNet <- mean.intraNet[2]
+  kOutNet <- mean.intraNet[3]
+  kDiffNet <- mean.intraNet[4]
+  
+  # Cálculo del Índice Rand
+  indiceRandNet <- mclust::adjustedRandIndex(net$moduleColors,
+                                             netBoot$moduleColors)
+  
+  # Estudio de las anotacioenes de la Red
+  if(anotation){
+    anotationNet <- sum(sort(table(netBootAnotation$query.number),
+                           decreasing=T))
+  } else{
+    net.goBoot = CoExpNets::getGProfilerOnNet(net.file=net.name,
+                             exclude.iea=F,
+			out.file=paste0(net.name,"_gprof.csv"))
+    anotationNet <- sum(sort(table(net.goBoot$query.number),
+                             decreasing=T))
+  }
+  moduleMeanAnotation <- anotationNet/numberModules
+  # Estudio de las anotacioens según el tipo de célula
+  celltype.netBoot <- genAnnotationCellType(which.one="new",
+                                      net.in=netBoot,
+                                      return.processed = F,
+                                      doheatmap = F)
+  celltype.netBoot <- -log(celltype.netBoot)
+  cell.colBoot <- apply(celltype.netBoot, 1, sum)
+  cellBootAnotate <- celltype.netBoot[which(cell.colBoot>5),]
+  cellBootAnotateSum <- apply(cellBootAnotate,1,sum)
+  meanCellBootAnotateSum <- mean(cellBootAnotateSum)
+  celltypeBootAnotate <- nrow(cellBootAnotate)
+  countCell=c()
+  for(i in 1:nrow(cellBootAnotate)){
+    t=0
+    for(j in 1:ncol(cellBootAnotate)){
+      if(cellBootAnotate[i,j]>3){
+        t=t+1
+      } else next
+    }
+    countCell=c(countCell,t)
+  }
+  meanCountCell <- mean(countCell)
+  
+  # Estudio de los overlaps entre la red bootstrasp y la gold standard
+  XTblBoot <- overlapTable(net$moduleColors, netBoot$moduleColors)
+  XTblBoot$pTable[] = p.adjust(XTblBoot$pTable,method="fdr")
+  nM <- c()
+  meanLogSignificance <- c()
+  for(j in 1:ncol(XTblBoot$pTable)){
+    count = 0
+    log = 0
+    for(i in 1:nrow(XTblBoot$pTable)){
+      if(XTblBoot$pTable[i,j] < 0.05){
+        count = count + 1
+        log = log - log10(XTblBoot$pTable[i,j])
+      } else next
+    }
+    nM <- c(nM,count)
+    meanLogSignificance <- c(meanLogSignificance,log)
+  }
+  ### Ponemos mayor significancia
+  nM2 <- c()
+  meanLogSignificance2 <- c()
+  for(j in 1:ncol(XTblBoot$pTable)){
+    count = 0
+    log = 0
+    for(i in 1:nrow(XTblBoot$pTable)){
+      if(XTblBoot$pTable[i,j] < 0.5e-5){
+        count = count + 1
+        log = log - log10(XTblBoot$pTable[i,j])
+      } else next
+    }
+    nM2 <- c(nM2,count)
+    meanLogSignificance2 <- c(meanLogSignificance2,log)
+  }
+  LogSignificanceMean <- mean(meanLogSignificance)
+  meanNM <- mean(nM)
+  LogSignificanceMean2 <- mean(meanLogSignificance2)
+  meanNM2 <- mean(nM2)
+  #XTblBoot$pTable <- -log10(XTblBoot$pTable)
+  #SumLogOverlap <- apply(XTblBoot$pTable,2,sum)
+  #meanSumLogOveralp <- mean(SumLogOverlap)
+  PercentOverlap <- c()
+  for(j in 1:ncol(XTblBoot$pTable)){
+    for(i in 1:nrow(XTblBoot$pTable)){
+      if(XTblBoot$pTable[i,j] < 0.05){
+      PercentOverlap <- c(PercentOverlap,XTblBoot$countTable[i,j])
+      } else next
+    }
+  }
+  PercentOverlap2 <- sum(PercentOverlap)/ncol(expr.data2)
+  XTblBoot$pTable <- -log10(XTblBoot$pTable)
+  SumLogOverlap <- apply(XTblBoot$pTable,2,sum)
+  meanSumLogOveralp <- mean(SumLogOverlap)
+  
+  # Lo guardamos todo en un dataframe
+  df.netBoot <- data.frame("NumeroBootstraps" = numberBootstras, 
+                   "NumeroModulos" = numberModules,
+                   "Entropia" = entropyNetBoot,
+                   "EntropiaNormalizada" = entropyNormalise,
+                   "kTotal" = kTotalNet,
+                   "kWithin" = kWithinNet,
+                   "kOut" = kOutNet,
+                   "kDiff" = kDiffNet,
+                   "IndiceRand" = indiceRandNet,
+                   "NumeroAnotaciones" = anotationNet,
+                   "AnotacionMediaModulo" = moduleMeanAnotation,
+                   "CountCellAnotate" = celltypeBootAnotate,
+                   "MeanCellLogAnotate" = meanCellBootAnotateSum,
+                   "MeanModuleCellSignificance" = meanCountCell,
+                   "MeanModulesOverlap" = meanNM,
+                   "MeanModulesOverlapMaxSignificance" = meanNM2,
+                   "MeanLogOverlap" = meanSumLogOveralp,
+                   "MeanLogOverlapSignificance" = LogSignificanceMean,
+                   "MeanLogOverlapSignificance2" = LogSignificanceMean2,
+                   "PercentOverlap" = PercentOverlap2)
+  return(df.netBoot)
+
+}
+```
+
+De esta forma, probamos un ejemplo sobre la red de $10$ bootstraps.
+
+```{r}
+df.10 <- getStatisticsNet(net,net.10.10,net.go.10.10,expr.data2)
+df.10
+```
+
+Para tener todas las redes anotadas deberías de lanzar la función introduciendo una por una las redes bootstraps y, finalmente, con la función `rbind` unir por filas y extraer el data frame final.
+
+```{r}
+df.15 <- getStatisticsNet(net,net.10.15,net.go.10.15,expr.data2)
+df.20 <- getStatisticsNet(net,net.10.20,net.go.10.20,expr.data2)
+df.25 <- getStatisticsNet(net,net.10.25,net.go.10.25,expr.data2)
+df.30 <- getStatisticsNet(net,net.10.30,net.go.10.30,expr.data2)
+df.35 <- getStatisticsNet(net,net.10.35,net.go.10.35,expr.data2)
+df.40 <- getStatisticsNet(net,net.10.40,net.go.10.40,expr.data2)
+df.45 <- getStatisticsNet(net,net.10.45,net.go.10.45,expr.data2)
+df.50 <- getStatisticsNet(net,net.10.50,net.go.10.50,expr.data2)
+
+df.final <- rbind(df.10,df.15,df.20,df.25,df.30,df.35,df.40,df.45,df.50)
+df.final
+```
+
+Teniendo el data frame final podemos presentar las mismas gráficas vistas en las secciones anteriores.
+
+```{r}
+indiceTamModulos1 <- df.final$NumeroModulos/max(df.final$NumeroModulos)
+
+df.final$IndiceTamModulos <- indiceTamModulos1
+
+df.final$ConectividadNormalizada <- df.final$IndiceTamModulos*df.final$kWithin
+```
+
+```{r}
+net.10.1 <- readRDS("Muestra10/RedAllSamples/netnetAllSamples10.19.it.50.rds")
+net.go.10.1 <- read.csv("Muestra10/RedAllSamples/netnetAllSamples10.19.it.50.rds_gprof.csv")
+
+net.10.2 <- readRDS("Muestra10/RedAllSamples2/netnetAllSamples10.2.21.it.50.rds")
+net.go.10.2 <- read.csv("Muestra10/RedAllSamples2/netnetAllSamples10.2.21.it.50.rds_gprof.csv")
+
+net.10.3 <- readRDS("Muestra10/RedAllSamples3/netnetAllSamples10.3.21.it.50.rds")
+net.go.10.3 <- read.csv("Muestra10/RedAllSamples3/netnetAllSamples10.3.21.it.50.rds_gprof.csv")
+```
+
+```{r}
+numeroModulos.10.1 <- length(unique(net.10.1$moduleColors))
+numeroModulos.10.2 <- length(unique(net.10.2$moduleColors))
+numeroModulos.10.3 <- length(unique(net.10.3$moduleColors))
+numeroModulos.10 <- mean(c(numeroModulos.10.1,numeroModulos.10.2,numeroModulos.10.3))
+```
+
+```{r}
+#mclust::adjustedRandIndex(net.10.30$moduleColors,
+                                             #net.10$moduleColors)
+
+## Valor del índice Rand
+randNet10.1 <- mclust::adjustedRandIndex(net.10.1$moduleColors,
+                                             net$moduleColors)
+randNet10.2 <- mclust::adjustedRandIndex(net.10.2$moduleColors,
+                                             net$moduleColors)
+randNet10.3 <- mclust::adjustedRandIndex(net.10.3$moduleColors,
+                                             net$moduleColors)
+randNet10 <- mean(c(randNet10.1,randNet10.2,randNet10.3))
+```
+
+```{r}
+## Entropía
+entropyNet10.1 <- entropy.empirical(table(net.10.1$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.10.1$moduleColors))),unit = "log2")
+entropyNet10.2 <- entropy.empirical(table(net.10.2$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.10.2$moduleColors))),unit = "log2")
+entropyNet10.3 <- entropy.empirical(table(net.10.3$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.10.3$moduleColors))),unit = "log2")
+entropyNet10 <- mean(c(entropyNet10.1,entropyNet10.2,entropyNet10.3))
+```
+
+```{r}
+## Conectividad 
+expr.data2 <- expr.data[rownames(net.10.1$MEs),]
+
+intraNet10.1 <- intramodularConnectivity.fromExpr(
+    colors = net.10.1$moduleColors,datExpr = expr.data2,networkType = "signed")
+mean.intraNet10.1 <- apply(intraNet10.1, 2, mean)
+kWithinNet10.1 <- mean.intraNet10.1[2]
+
+expr.data2 <- expr.data[rownames(net.10.2$MEs),]
+
+intraNet10.2 <- intramodularConnectivity.fromExpr(
+    colors = net.10.2$moduleColors,datExpr = expr.data2,networkType = "signed")
+mean.intraNet10.2 <- apply(intraNet10.2, 2, mean)
+kWithinNet10.2 <- mean.intraNet10.2[2]
+
+expr.data2 <- expr.data[rownames(net.10.3$MEs),]
+
+intraNet10.3 <- intramodularConnectivity.fromExpr(
+    colors = net.10.3$moduleColors,datExpr = expr.data2,networkType = "signed")
+mean.intraNet10.3 <- apply(intraNet10.3, 2, mean)
+kWithinNet10.3 <- mean.intraNet10.3[2]
+
+kWithinNet10 <- mean(c(kWithinNet10.1,kWithinNet10.2,kWithinNet10.3))
+```
+
+```{r}
+## Anotaciones
+anotationNet.10.1 <- sum(sort(table(net.go.10.1$query.number),
+                           decreasing=T))
+moduleMeanAnotation.10.1 <- anotationNet.10.1/numeroModulos.10.1
+
+anotationNet.10.2 <- sum(sort(table(net.go.10.2$query.number),
+                           decreasing=T))
+moduleMeanAnotation.10.2 <- anotationNet.10.2/numeroModulos.10.2
+
+anotationNet.10.3 <- sum(sort(table(net.go.10.3$query.number),
+                           decreasing=T))
+moduleMeanAnotation.10.3 <- anotationNet.10.3/numeroModulos.10.3
+
+anotationNet.10 <- mean(c(anotationNet.10.1,anotationNet.10.2,anotationNet.10.3))
+moduleMeanAnotation.10 <- mean(c(moduleMeanAnotation.10.1,moduleMeanAnotation.10.2,moduleMeanAnotation.10.3))
+```
+
+```{r}
+## Anotaciones sobre el tipo de célula
+celltype.net10.1 <- genAnnotationCellType(which.one="new",
+                                    net.in=net.10.1,
+                                    return.processed = F,
+                                    doheatmap = F)
+celltype.net10.1 <- -log(celltype.net10.1)
+cell.col10.1 <- apply(celltype.net10.1, 1, sum)
+cellAnotate10.1 <- celltype.net10.1[which(cell.col10.1>5),]
+cellAnotateSum10.1 <- apply(cellAnotate10.1,1,sum)
+meanCellAnotateSum10.1 <- mean(cellAnotateSum10.1)
+celltypeAnotate10.1 <- nrow(cellAnotate10.1)
+countCell10.1=c()
+for(i in 1:nrow(cellAnotate10.1)){
+  t=0
+  for(j in 1:ncol(cellAnotate10.1)){
+    if(cellAnotate10.1[i,j]>3){
+      t=t+1
+    } else next
+  }
+  countCell10.1=c(countCell10.1,t)
+}
+meanCountCell10.1 <- mean(countCell10.1)
+
+celltype.net10.2 <- genAnnotationCellType(which.one="new",
+                                    net.in=net.10.2,
+                                    return.processed = F,
+                                    doheatmap = F)
+celltype.net10.2 <- -log(celltype.net10.2)
+cell.col10.2 <- apply(celltype.net10.2, 1, sum)
+cellAnotate10.2 <- celltype.net10.2[which(cell.col10.2>5),]
+cellAnotateSum10.2 <- apply(cellAnotate10.2,1,sum)
+meanCellAnotateSum10.2 <- mean(cellAnotateSum10.2)
+celltypeAnotate10.2 <- nrow(cellAnotate10.2)
+countCell10.2=c()
+for(i in 1:nrow(cellAnotate10.2)){
+  t=0
+  for(j in 1:ncol(cellAnotate10.2)){
+    if(cellAnotate10.2[i,j]>3){
+      t=t+1
+    } else next
+  }
+  countCell10.2=c(countCell10.2,t)
+}
+meanCountCell10.2 <- mean(countCell10.2)
+
+celltype.net10.3 <- genAnnotationCellType(which.one="new",
+                                    net.in=net.10.3,
+                                    return.processed = F,
+                                    doheatmap = F)
+celltype.net10.3 <- -log(celltype.net10.3)
+cell.col10.3 <- apply(celltype.net10.3, 1, sum)
+cellAnotate10.3 <- celltype.net10.3[which(cell.col10.3>5),]
+cellAnotateSum10.3 <- apply(cellAnotate10.3,1,sum)
+meanCellAnotateSum10.3 <- mean(cellAnotateSum10.3)
+celltypeAnotate10.3 <- nrow(cellAnotate10.3)
+countCell10.3=c()
+for(i in 1:nrow(cellAnotate10.3)){
+  t=0
+  for(j in 1:ncol(cellAnotate10.3)){
+    if(cellAnotate10.3[i,j]>3){
+      t=t+1
+    } else next
+  }
+  countCell10.3=c(countCell10.3,t)
+}
+meanCountCell10.3 <- mean(countCell10.3)
+
+celltypeAnotate10 <- mean(c(celltypeAnotate10.1,celltypeAnotate10.2,celltypeAnotate10.3))
+meanCellAnotateSum10 <- mean(c(meanCellAnotateSum10.1,meanCellAnotateSum10.2,meanCellAnotateSum10.3))
+meanCountCell10 <- mean(c(meanCountCell10.1,meanCountCell10.2,meanCountCell10.3))
+```
+
+
+```{r}
+## Estudio de Overlaps
+XTblBoot10.1 <- overlapTable(net$moduleColors, net.10.1$moduleColors)
+XTblBoot10.1$pTable[] = p.adjust(XTblBoot10.1$pTable,method="fdr")
+nM10.1 <- c()
+meanLogSignificance10.1 <- c()
+for(j in 1:ncol(XTblBoot10.1$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTblBoot10.1$pTable)){
+    if(XTblBoot10.1$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTblBoot10.1$pTable[i,j])
+    } else next
+  }
+  nM10.1 <- c(nM10.1,count)
+  meanLogSignificance10.1 <- c(meanLogSignificance10.1,log)
+}
+LogSignificanceMean10.1 <- mean(meanLogSignificance10.1)
+meanNM10.1 <- mean(nM10.1)
+#XTblBoot10.1$pTable <- -log10(XTblBoot10.1$pTable)
+#SumLogOverlap10.1 <- apply(XTblBoot10.1$pTable,2,sum)
+#meanSumLogOverlap10.1 <- mean(SumLogOverlap10.1)
+PercentOverlap10.1 <- c()
+for(j in 1:ncol(XTblBoot10.1$pTable)){
+  for(i in 1:nrow(XTblBoot10.1$pTable)){
+    if(XTblBoot10.1$pTable[i,j] < 0.05){
+    PercentOverlap10.1 <- c(PercentOverlap10.1,XTblBoot10.1$countTable[i,j])
+    } else next
+  }
+}
+PercentOverlap210.1 <- sum(PercentOverlap10.1)/ncol(expr.data2)
+XTblBoot10.1$pTable <- -log10(XTblBoot10.1$pTable)
+SumLogOverlap10.1 <- apply(XTblBoot10.1$pTable,2,sum)
+meanSumLogOverlap10.1 <- mean(SumLogOverlap10.1)
+
+XTblBoot10.2 <- overlapTable(net$moduleColors, net.10.2$moduleColors)
+XTblBoot10.2$pTable[] = p.adjust(XTblBoot10.2$pTable,method="fdr")
+nM10.2 <- c()
+meanLogSignificance10.2 <- c()
+for(j in 1:ncol(XTblBoot10.2$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTblBoot10.2$pTable)){
+    if(XTblBoot10.2$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTblBoot10.2$pTable[i,j])
+    } else next
+  }
+  nM10.2 <- c(nM10.2,count)
+  meanLogSignificance10.2 <- c(meanLogSignificance10.2,log)
+}
+LogSignificanceMean10.2 <- mean(meanLogSignificance10.2)
+meanNM10.2 <- mean(nM10.2)
+#XTblBoot10.2$pTable <- -log10(XTblBoot10.2$pTable)
+#SumLogOverlap10.2 <- apply(XTblBoot10.2$pTable,2,sum)
+#meanSumLogOverlap10.2 <- mean(SumLogOverlap10.2)
+PercentOverlap10.2 <- c()
+for(j in 1:ncol(XTblBoot10.2$pTable)){
+  for(i in 1:nrow(XTblBoot10.2$pTable)){
+    if(XTblBoot10.2$pTable[i,j] < 0.05){
+    PercentOverlap10.2 <- c(PercentOverlap10.2,XTblBoot10.2$countTable[i,j])
+    } else next
+  }
+}
+PercentOverlap210.2 <- sum(PercentOverlap10.2)/ncol(expr.data2)
+XTblBoot10.2$pTable <- -log10(XTblBoot10.2$pTable)
+SumLogOverlap10.2 <- apply(XTblBoot10.2$pTable,2,sum)
+meanSumLogOverlap10.2 <- mean(SumLogOverlap10.2)
+
+XTblBoot10.3 <- overlapTable(net$moduleColors, net.10.3$moduleColors)
+XTblBoot10.3$pTable[] = p.adjust(XTblBoot10.3$pTable,method="fdr")
+nM10.3 <- c()
+meanLogSignificance10.3 <- c()
+for(j in 1:ncol(XTblBoot10.3$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTblBoot10.3$pTable)){
+    if(XTblBoot10.3$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTblBoot10.3$pTable[i,j])
+    } else next
+  }
+  nM10.3 <- c(nM10.3,count)
+  meanLogSignificance10.3 <- c(meanLogSignificance10.3,log)
+}
+LogSignificanceMean10.3 <- mean(meanLogSignificance10.3)
+meanNM10.3 <- mean(nM10.3)
+#XTblBoot10.3$pTable <- -log10(XTblBoot10.3$pTable)
+#SumLogOverlap10.3 <- apply(XTblBoot10.3$pTable,2,sum)
+#meanSumLogOverlap10.3 <- mean(SumLogOverlap10.3)
+PercentOverlap10.3 <- c()
+for(j in 1:ncol(XTblBoot10.3$pTable)){
+  for(i in 1:nrow(XTblBoot10.3$pTable)){
+    if(XTblBoot10.3$pTable[i,j] < 0.05){
+    PercentOverlap10.3 <- c(PercentOverlap10.3,XTblBoot10.3$countTable[i,j])
+    } else next
+  }
+}
+PercentOverlap210.3 <- sum(PercentOverlap10.3)/ncol(expr.data2)
+XTblBoot10.3$pTable <- -log10(XTblBoot10.3$pTable)
+SumLogOverlap10.3 <- apply(XTblBoot10.3$pTable,2,sum)
+meanSumLogOverlap10.3 <- mean(SumLogOverlap10.3)
+
+meanNM10 <- mean(c(meanNM10.1,meanNM10.2,meanNM10.3))
+meanSumLogOverlap10 <- mean(c(meanSumLogOverlap10.1,meanSumLogOverlap10.2,meanSumLogOverlap10.3))
+PercentOverlap210 <- mean(c(PercentOverlap210.1,PercentOverlap210.2,PercentOverlap210.3))
+```
+
+## Submuestra tamaño 20
+
+
+Cargamos las redes:
+
+```{r}
+net.20.10 <- readRDS("Muestra20/results10/netBootBootstrap.17.it.50.b.10.rds")
+net.20.15 <- readRDS("Muestra20/results15/netBootBootstrap.19.it.50.b.15.rds")
+net.20.20 <- readRDS("Muestra20/results20/netBootBootstrap.19.it.50.b.20.rds")
+net.20.25 <- readRDS("Muestra20/results25/netBootBootstrap.18.it.50.b.25.rds")
+net.20.30 <- readRDS("Muestra20/results30/netBootBootstrap.17.it.50.b.30.rds")
+net.20.35 <- readRDS("Muestra20/results35/netBootBootstrap.17.it.50.b.35.rds")
+net.20.40 <- readRDS("Muestra20/results40/netBootBootstrap.17.it.50.b.40.rds")
+net.20.45 <- readRDS("Muestra20/results45/netBootBootstrap.18.it.50.b.45.rds")
+net.20.50 <- readRDS("Muestra20/results50/netBootBootstrap.18.it.50.b.50.rds")
+```
+
+Cargamos las anotaciones:
+
+```{r}
+net.go.20.10 <- read.csv("Muestra20/results10/netBootBootstrap.17.it.50.b.10.rds_gprof.csv")
+net.go.20.15 <- read.csv("Muestra20/results15/netBootBootstrap.19.it.50.b.15.rds_gprof.csv")
+net.go.20.20 <- read.csv("Muestra20/results20/netBootBootstrap.19.it.50.b.20.rds_gprof.csv")
+net.go.20.25 <- read.csv("Muestra20/results25/netBootBootstrap.18.it.50.b.25.rds_gprof.csv")
+net.go.20.30 <- read.csv("Muestra20/results30/netBootBootstrap.17.it.50.b.30.rds_gprof.csv")
+net.go.20.35 <- read.csv("Muestra20/results35/netBootBootstrap.17.it.50.b.35.rds_gprof.csv")
+net.go.20.40 <- read.csv("Muestra20/results40/netBootBootstrap.17.it.50.b.40.rds_gprof.csv")
+net.go.20.45 <- read.csv("Muestra20/results45/netBootBootstrap.18.it.50.b.45.rds_gprof.csv")
+net.go.20.50 <- read.csv("Muestra20/results50/netBootBootstrap.18.it.50.b.50.rds_gprof.csv")
+```
+
+```{r}
+expr.data2 <- expr.data[rownames(net.20.10$MEs),]
+```
+
+Utilizando la función creada antes, obtenemos los estadísticos de las redes:
+
+
+```{r}
+df.20.10 <- getStatisticsNet(net,net.20.10,net.go.20.10,expr.data2)
+df.20.15 <- getStatisticsNet(net,net.20.15,net.go.20.15,expr.data2)
+df.20.20 <- getStatisticsNet(net,net.20.20,net.go.20.20,expr.data2)
+df.20.25 <- getStatisticsNet(net,net.20.25,net.go.20.25,expr.data2)
+df.20.30 <- getStatisticsNet(net,net.20.30,net.go.20.30,expr.data2)
+df.20.35 <- getStatisticsNet(net,net.20.35,net.go.20.35,expr.data2)
+df.20.40 <- getStatisticsNet(net,net.20.40,net.go.20.40,expr.data2)
+df.20.45 <- getStatisticsNet(net,net.20.45,net.go.20.45,expr.data2)
+df.20.50 <- getStatisticsNet(net,net.20.50,net.go.20.50,expr.data2)
+
+df.final.20 <- rbind(df.20.10,df.20.15,df.20.20,df.20.25,df.20.30,df.20.35,df.20.40,df.20.45,df.20.50)
+df.final.20
+```
+
+```{r}
+net.20.1 <- readRDS("Muestra20/RedAllSamples/netnetAllSamples20.12.it.50.rds")
+net.go.20.1 <- read.csv("Muestra20/RedAllSamples/netnetAllSamples20.12.it.50.rds_gprof.csv")
+
+net.20.2 <- readRDS("Muestra20/RedAllSamples2/netnetAllSamples20.2.16.it.50.rds")
+net.go.20.2 <- read.csv("Muestra20/RedAllSamples2/netnetAllSamples20.2.16.it.50.rds_gprof.csv")
+
+net.20.3 <- readRDS("Muestra20/RedAllSamples3/netnetAllSamples20.3.18.it.50.rds")
+net.go.20.3 <- read.csv("Muestra20/RedAllSamples3/netnetAllSamples20.3.18.it.50.rds_gprof.csv")
+```
+
+```{r}
+numeroModulos.20.1 <- length(unique(net.20.1$moduleColors))
+numeroModulos.20.2 <- length(unique(net.20.2$moduleColors))
+numeroModulos.20.3 <- length(unique(net.20.3$moduleColors))
+
+numeroModulos.20 <- mean(c(numeroModulos.20.1,numeroModulos.20.2,numeroModulos.20.3))
+```
+
+```{r}
+#mclust::adjustedRandIndex(net.20.30$moduleColors,
+ #                                            net.20$moduleColors)
+
+## Valor del índice Rand
+randNet20.1 <- mclust::adjustedRandIndex(net.20.1$moduleColors,
+                                             net$moduleColors)
+randNet20.2 <- mclust::adjustedRandIndex(net.20.2$moduleColors,
+                                             net$moduleColors)
+randNet20.3 <- mclust::adjustedRandIndex(net.20.3$moduleColors,
+                                             net$moduleColors)
+
+randNet20 <- mean(c(randNet20.1,randNet20.2,randNet20.3))
+```
+
+```{r}
+## Entropía
+entropyNet20.1 <- entropy.empirical(table(net.20.1$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.20.1$moduleColors))),unit = "log2")
+entropyNet20.2 <- entropy.empirical(table(net.20.2$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.20.2$moduleColors))),unit = "log2")
+entropyNet20.3 <- entropy.empirical(table(net.20.3$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.20.3$moduleColors))),unit = "log2")
+
+entropyNet20 <- mean(c(entropyNet20.1,entropyNet20.2,entropyNet20.3))
+```
+
+```{r}
+## Conectividad 
+expr.data2 <- expr.data[rownames(net.20.1$MEs),]
+
+intraNet20.1 <- intramodularConnectivity.fromExpr(
+    colors = net.20.1$moduleColors,datExpr = expr.data2,networkType = "signed")
+mean.intraNet20.1 <- apply(intraNet20.1, 2, mean)
+kWithinNet20.1 <- mean.intraNet20.1[2]
+
+expr.data2 <- expr.data[rownames(net.20.2$MEs),]
+
+intraNet20.2 <- intramodularConnectivity.fromExpr(
+    colors = net.20.2$moduleColors,datExpr = expr.data2,networkType = "signed")
+mean.intraNet20.2 <- apply(intraNet20.2, 2, mean)
+kWithinNet20.2 <- mean.intraNet20.2[2]
+
+expr.data2 <- expr.data[rownames(net.20.3$MEs),]
+
+intraNet20.3 <- intramodularConnectivity.fromExpr(
+    colors = net.20.3$moduleColors,datExpr = expr.data2,networkType = "signed")
+mean.intraNet20.3 <- apply(intraNet20.3, 2, mean)
+kWithinNet20.3 <- mean.intraNet20.3[2]
+
+kWithinNet20 <- mean(c(kWithinNet20.1,kWithinNet20.2,kWithinNet20.3))
+```
+
+```{r}
+## Anotaciones
+anotationNet.20.1 <- sum(sort(table(net.go.20.1$query.number),
+                           decreasing=T))
+moduleMeanAnotation.20.1 <- anotationNet.20.1/numeroModulos.20.1
+
+anotationNet.20.2 <- sum(sort(table(net.go.20.2$query.number),
+                           decreasing=T))
+moduleMeanAnotation.20.2 <- anotationNet.20.2/numeroModulos.20.2
+
+anotationNet.20.3 <- sum(sort(table(net.go.20.3$query.number),
+                           decreasing=T))
+moduleMeanAnotation.20.3 <- anotationNet.20.3/numeroModulos.20.3
+
+anotationNet.20 <- mean(c(anotationNet.20.1,anotationNet.20.2,anotationNet.20.3))
+moduleMeanAnotation.20 <- mean(c(moduleMeanAnotation.20.1,moduleMeanAnotation.20.2,moduleMeanAnotation.20.3))
+```
+
+```{r}
+## Anotaciones sobre el tipo de célula
+celltype.net20.1 <- genAnnotationCellType(which.one="new",
+                                    net.in=net.20.1,
+                                    return.processed = F,
+                                    doheatmap = F)
+celltype.net20.1 <- -log(celltype.net20.1)
+cell.col20.1 <- apply(celltype.net20.1, 1, sum)
+cellAnotate20.1 <- celltype.net20.1[which(cell.col20.1>5),]
+cellAnotateSum20.1 <- apply(cellAnotate20.1,1,sum)
+meanCellAnotateSum20.1 <- mean(cellAnotateSum20.1)
+celltypeAnotate20.1 <- nrow(cellAnotate20.1)
+countCell20.1=c()
+for(i in 1:nrow(cellAnotate20.1)){
+  t=0
+  for(j in 1:ncol(cellAnotate20.1)){
+    if(cellAnotate20.1[i,j]>3){
+      t=t+1
+    } else next
+  }
+  countCell20.1=c(countCell20.1,t)
+}
+meanCountCell20.1 <- mean(countCell20.1)
+
+celltype.net20.2 <- genAnnotationCellType(which.one="new",
+                                    net.in=net.20.2,
+                                    return.processed = F,
+                                    doheatmap = F)
+celltype.net20.2 <- -log(celltype.net20.2)
+cell.col20.2 <- apply(celltype.net20.2, 1, sum)
+cellAnotate20.2 <- celltype.net20.2[which(cell.col20.2>5),]
+cellAnotateSum20.2 <- apply(cellAnotate20.2,1,sum)
+meanCellAnotateSum20.2 <- mean(cellAnotateSum20.2)
+celltypeAnotate20.2 <- nrow(cellAnotate20.2)
+countCell20.2=c()
+for(i in 1:nrow(cellAnotate20.2)){
+  t=0
+  for(j in 1:ncol(cellAnotate20.2)){
+    if(cellAnotate20.2[i,j]>3){
+      t=t+1
+    } else next
+  }
+  countCell20.2=c(countCell20.2,t)
+}
+meanCountCell20.2 <- mean(countCell20.2)
+
+celltype.net20.3 <- genAnnotationCellType(which.one="new",
+                                    net.in=net.20.3,
+                                    return.processed = F,
+                                    doheatmap = F)
+celltype.net20.3 <- -log(celltype.net20.3)
+cell.col20.3 <- apply(celltype.net20.3, 1, sum)
+cellAnotate20.3 <- celltype.net20.3[which(cell.col20.3>5),]
+cellAnotateSum20.3 <- apply(cellAnotate20.3,1,sum)
+meanCellAnotateSum20.3 <- mean(cellAnotateSum20.3)
+celltypeAnotate20.3 <- nrow(cellAnotate20.3)
+countCell20.3=c()
+for(i in 1:nrow(cellAnotate20.3)){
+  t=0
+  for(j in 1:ncol(cellAnotate20.3)){
+    if(cellAnotate20.3[i,j]>3){
+      t=t+1
+    } else next
+  }
+  countCell20.3=c(countCell20.3,t)
+}
+meanCountCell20.3 <- mean(countCell20.3)
+
+celltypeAnotate20 <- mean(c(celltypeAnotate20.1,celltypeAnotate20.2,celltypeAnotate20.3))
+meanCellAnotateSum20 <- mean(c(meanCellAnotateSum20.1,meanCellAnotateSum20.2,meanCellAnotateSum20.3))
+meanCountCell20 <- mean(c(meanCountCell20.1,meanCountCell20.2,meanCountCell20.3))
+```
+
+
+```{r}
+## Estudio de Overlaps
+XTblBoot20.1 <- overlapTable(net$moduleColors, net.20.1$moduleColors)
+XTblBoot20.1$pTable[] = p.adjust(XTblBoot20.1$pTable,method="fdr")
+nM20.1 <- c()
+meanLogSignificance20.1 <- c()
+for(j in 1:ncol(XTblBoot20.1$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTblBoot20.1$pTable)){
+    if(XTblBoot20.1$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTblBoot20.1$pTable[i,j])
+    } else next
+  }
+  nM20.1 <- c(nM20.1,count)
+  meanLogSignificance20.1 <- c(meanLogSignificance20.1,log)
+}
+LogSignificanceMean20.1 <- mean(meanLogSignificance20.1)
+meanNM20.1 <- mean(nM20.1)
+#XTblBoot20.1$pTable <- -log10(XTblBoot20.1$pTable)
+#SumLogOverlap20.1 <- apply(XTblBoot20.1$pTable,2,sum)
+#meanSumLogOverlap20.1 <- mean(SumLogOverlap20.1)
+PercentOverlap20.1 <- c()
+for(j in 1:ncol(XTblBoot20.1$pTable)){
+  for(i in 1:nrow(XTblBoot20.1$pTable)){
+    if(XTblBoot20.1$pTable[i,j] < 0.05){
+    PercentOverlap20.1 <- c(PercentOverlap20.1,XTblBoot20.1$countTable[i,j])
+    } else next
+  }
+}
+PercentOverlap220.1 <- sum(PercentOverlap20.1)/ncol(expr.data2)
+XTblBoot20.1$pTable <- -log10(XTblBoot20.1$pTable)
+SumLogOverlap20.1 <- apply(XTblBoot20.1$pTable,2,sum)
+meanSumLogOverlap20.1 <- mean(SumLogOverlap20.1)
+
+XTblBoot20.2 <- overlapTable(net$moduleColors, net.20.2$moduleColors)
+XTblBoot20.2$pTable[] = p.adjust(XTblBoot20.2$pTable,method="fdr")
+nM20.2 <- c()
+meanLogSignificance20.2 <- c()
+for(j in 1:ncol(XTblBoot20.2$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTblBoot20.2$pTable)){
+    if(XTblBoot20.2$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTblBoot20.2$pTable[i,j])
+    } else next
+  }
+  nM20.2 <- c(nM20.2,count)
+  meanLogSignificance20.2 <- c(meanLogSignificance20.2,log)
+}
+LogSignificanceMean20.2 <- mean(meanLogSignificance20.2)
+meanNM20.2 <- mean(nM20.2)
+#XTblBoot20.2$pTable <- -log10(XTblBoot20.2$pTable)
+#SumLogOverlap20.2 <- apply(XTblBoot20.2$pTable,2,sum)
+#meanSumLogOverlap20.2 <- mean(SumLogOverlap20.2)
+PercentOverlap20.2 <- c()
+for(j in 1:ncol(XTblBoot20.2$pTable)){
+  for(i in 1:nrow(XTblBoot20.2$pTable)){
+    if(XTblBoot20.2$pTable[i,j] < 0.05){
+    PercentOverlap20.2 <- c(PercentOverlap20.2,XTblBoot20.2$countTable[i,j])
+    } else next
+  }
+}
+PercentOverlap220.2 <- sum(PercentOverlap20.2)/ncol(expr.data2)
+XTblBoot20.2$pTable <- -log10(XTblBoot20.2$pTable)
+SumLogOverlap20.2 <- apply(XTblBoot20.2$pTable,2,sum)
+meanSumLogOverlap20.2 <- mean(SumLogOverlap20.2)
+
+XTblBoot20.3 <- overlapTable(net$moduleColors, net.20.3$moduleColors)
+XTblBoot20.3$pTable[] = p.adjust(XTblBoot20.3$pTable,method="fdr")
+nM20.3 <- c()
+meanLogSignificance20.3 <- c()
+for(j in 1:ncol(XTblBoot20.3$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTblBoot20.3$pTable)){
+    if(XTblBoot20.3$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTblBoot20.3$pTable[i,j])
+    } else next
+  }
+  nM20.3 <- c(nM20.3,count)
+  meanLogSignificance20.3 <- c(meanLogSignificance20.3,log)
+}
+LogSignificanceMean20.3 <- mean(meanLogSignificance20.3)
+meanNM20.3 <- mean(nM20.3)
+#XTblBoot20.3$pTable <- -log10(XTblBoot20.3$pTable)
+#SumLogOverlap20.3 <- apply(XTblBoot20.3$pTable,2,sum)
+#meanSumLogOverlap20.3 <- mean(SumLogOverlap20.3)
+PercentOverlap20.3 <- c()
+for(j in 1:ncol(XTblBoot20.3$pTable)){
+  for(i in 1:nrow(XTblBoot20.3$pTable)){
+    if(XTblBoot20.3$pTable[i,j] < 0.05){
+    PercentOverlap20.3 <- c(PercentOverlap20.3,XTblBoot20.3$countTable[i,j])
+    } else next
+  }
+}
+PercentOverlap220.3 <- sum(PercentOverlap20.3)/ncol(expr.data2)
+XTblBoot20.3$pTable <- -log10(XTblBoot20.3$pTable)
+SumLogOverlap20.3 <- apply(XTblBoot20.3$pTable,2,sum)
+meanSumLogOverlap20.3 <- mean(SumLogOverlap20.3)
+
+meanNM20 <- mean(c(meanNM20.1,meanNM20.2,meanNM20.3))
+meanSumLogOverlap20 <- mean(c(meanSumLogOverlap20.1,meanSumLogOverlap20.2,meanSumLogOverlap20.3))
+PercentOverlap220 <- mean(c(PercentOverlap220.1,PercentOverlap220.2,PercentOverlap220.3))
+```
+
+
+
+### Número de módulos
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,NumeroModulos))+
+  geom_line(col="red")+
+  labs(title="Evolución del número de módulos por bootstraps", 
+       subtitle="Muestra de tamaño 20",
+       y="Número de módulos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="red")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Entropía de los módulos
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,Entropia))+
+  geom_line(col="blue")+
+  labs(title="Evolución del valor de entropía por bootstraps", 
+       subtitle="Muestra de tamaño 20",
+       y="Valor de la Entropía",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  geom_hline(yintercept = entropyGold,col = "red")+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,EntropiaNormalizada))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la entropía de las redes bootstraps \n restadas por la entropía de la gold standard", 
+       subtitle="Muestra de tamaño 20",
+       y="Entropía de las redes bootstraps menos la gold standard",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Estudio de la conectividad
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,kWithin))+
+  geom_line(col="blue")+
+  labs(title="Evolución del valor de kWithin por bootstraps", 
+       subtitle="Muestra de tamaño 20",
+       y="Valor de kWithin",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  geom_hline(yintercept = goldKWithin,col = "red")+
+  theme_gray()
+```
+
+```{r}
+indiceTamModulos2 <- df.final.20$NumeroModulos/max(df.final.20$NumeroModulos)
+
+df.final.20$IndiceTamModulos <- indiceTamModulos2
+
+df.final.20$ConectividadNormalizada <- df.final.20$IndiceTamModulos*df.final.20$kWithin
+```
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,ConectividadNormalizada))+
+  geom_line(col="blue")+
+  labs(title="Evolución del valor de kWithin normalizada previeamente según el número de módulos", 
+       subtitle="Muestra de tamaño 20",
+       y="Valor de kWithin normalizado según número de módulos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  geom_hline(yintercept = goldKWithin,col = "red")+
+  theme_gray()
+```
+
+### Estudio del índice Rand
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,IndiceRand))+
+  geom_line(col="blue")+
+  labs(title="Evolución del valor del índice Rand por bootstraps", 
+       subtitle="Muestra de tamaño 20",
+       y="Valor del índice Rand",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Estudio del número de anotaciones
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,NumeroAnotaciones))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la cantidad de anotaciones por bootstraps", 
+       subtitle="Muestra de tamaño 20",
+       y="Cantidad de Anotaciones",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  geom_hline(yintercept = anotationGold,col = "red")+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,AnotacionMediaModulo))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de anotaciones por módulo según el número de bootstrasp", 
+       subtitle="Muestra de tamaño 20",
+       y="Media de anotaciones por módulo",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  geom_hline(yintercept = moduleMeanAnotationGold,col = "red")+
+  theme_gray()
+```
+
+### Estudio sobre las anotaciones del tipo de célula
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,CountCellAnotate))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la cantidad de tipos de células significativos", 
+       subtitle="Muestra de tamaño 20",
+       y="Número de tipos de células significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,MeanCellLogAnotate))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de -log(pval) según los tipos significativos", 
+       subtitle="Muestra de tamaño 20",
+       y="Número de tipos de células significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,MeanModuleCellSignificance))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de módulos significantes con los tipos de célula significativos", 
+       subtitle="Muestra de tamaño 20",
+       y="Media de módulos significantes",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Estudio de Overlaps
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,MeanModulesOverlap))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media del número de módulos significativos según los overlaps con la gold standard", 
+       subtitle="Muestra de tamaño 20",
+       y="Media de módulos significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,MeanModulesOverlapMaxSignificance))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media del número de módulos \n significativos según los overlaps con la gold standard", 
+       subtitle="Muestra de tamaño 20",
+       y="Media de módulos significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,MeanLogOverlap))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de -log(pval) de la tabla de Overlaps", 
+       subtitle="Muestra de tamaño 20",
+       y="Valor medio de -log(pval)",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,MeanLogOverlapSignificance))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de -log(pval) de la tabla de Overlaps sólo con módulos significantes", 
+       subtitle="Muestra de tamaño 20",
+       y="Valor medio de -log(pval)",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.20, aes(NumeroBootstraps,PercentOverlap))+
+  geom_line(col="blue")+
+  labs(title="Evolución del porcentaje de genes de la red bootstraps situados en una celda significagiva", 
+       subtitle="Muestra de tamaño 20",
+       y="Porcentaje de las redes",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.20$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+## Submuestra de tamaño 30
+
+```{r}
+net.30.10 <- readRDS("Muestra30/results10/netBootBootstrap.12.it.50.b.10.rds")
+net.30.15 <- readRDS("Muestra30/results15/netBootBootstrap.12.it.50.b.15.rds")
+net.30.20 <- readRDS("Muestra30/results20/netBootBootstrap.13.it.50.b.20.rds")
+net.30.25 <- readRDS("Muestra30/results25/netBootBootstrap.13.it.50.b.25.rds")
+net.30.30 <- readRDS("Muestra30/results30/netBootBootstrap.12.it.50.b.30.rds")
+net.30.35 <- readRDS("Muestra30/results35/netBootBootstrap.13.it.50.b.35.rds")
+net.30.40 <- readRDS("Muestra30/results40/netBootBootstrap.13.it.50.b.40.rds")
+net.30.45 <- readRDS("Muestra30/results45/netBootBootstrap.12.it.50.b.45.rds")
+net.30.50 <- readRDS("Muestra30/results50/netBootBootstrap.12.it.50.b.50.rds")
+```
+
+```{r}
+net.go.30.10 <- read.csv("Muestra30/results10/netBootBootstrap.12.it.50.b.10.rds_gprof.csv")
+net.go.30.15 <- read.csv("Muestra30/results15/netBootBootstrap.12.it.50.b.15.rds_gprof.csv")
+net.go.30.20 <- read.csv("Muestra30/results20/netBootBootstrap.13.it.50.b.20.rds_gprof.csv")
+net.go.30.25 <- read.csv("Muestra30/results25/netBootBootstrap.13.it.50.b.25.rds_gprof.csv")
+net.go.30.30 <- read.csv("Muestra30/results30/netBootBootstrap.12.it.50.b.30.rds_gprof.csv")
+net.go.30.35 <- read.csv("Muestra30/results35/netBootBootstrap.13.it.50.b.35.rds_gprof.csv")
+net.go.30.40 <- read.csv("Muestra30/results40/netBootBootstrap.13.it.50.b.40.rds_gprof.csv")
+net.go.30.45 <- read.csv("Muestra30/results45/netBootBootstrap.12.it.50.b.45.rds_gprof.csv")
+net.go.30.50 <- read.csv("Muestra30/results50/netBootBootstrap.12.it.50.b.50.rds_gprof.csv")
+```
+
+```{r}
+expr.data2 <- expr.data[rownames(net.30.10$MEs),]
+```
+
+```{r}
+df.30.10 <- getStatisticsNet(net,net.30.10,net.go.30.10,expr.data2)
+df.30.15 <- getStatisticsNet(net,net.30.15,net.go.30.15,expr.data2)
+df.30.20 <- getStatisticsNet(net,net.30.20,net.go.30.20,expr.data2)
+df.30.25 <- getStatisticsNet(net,net.30.25,net.go.30.25,expr.data2)
+df.30.30 <- getStatisticsNet(net,net.30.30,net.go.30.30,expr.data2)
+df.30.35 <- getStatisticsNet(net,net.30.35,net.go.30.35,expr.data2)
+df.30.40 <- getStatisticsNet(net,net.30.40,net.go.30.40,expr.data2)
+df.30.45 <- getStatisticsNet(net,net.30.45,net.go.30.45,expr.data2)
+df.30.50 <- getStatisticsNet(net,net.30.50,net.go.30.50,expr.data2)
+
+df.final.30 <- rbind(df.30.10,df.30.15,df.30.20,df.30.25,df.30.30,df.30.35,df.30.40,df.30.45,df.30.50)
+df.final.30
+```
+
+```{r}
+net.30.1 <- readRDS("Muestra30/RedAllSamples/netnetAllSamples30.10.it.50.rds")
+net.go.30.1 <- read.csv("Muestra30/RedAllSamples/netnetAllSamples30.10.it.50.rds_gprof.csv")
+
+net.30.2 <- readRDS("Muestra30/RedAllSamples2/netnetAllSamples30.2.11.it.50.rds")
+net.go.30.2 <- read.csv("Muestra30/RedAllSamples2/netnetAllSamples30.2.11.it.50.rds_gprof.csv")
+
+net.30.3 <- readRDS("Muestra30/RedAllSamples3/netnetAllSamples30.3.14.it.50.rds")
+net.go.30.3 <- read.csv("Muestra30/RedAllSamples3/netnetAllSamples30.3.14.it.50.rds_gprof.csv")
+```
+
+```{r}
+numeroModulos.30.1 <- length(unique(net.30.1$moduleColors))
+numeroModulos.30.2 <- length(unique(net.30.2$moduleColors))
+numeroModulos.30.3 <- length(unique(net.30.3$moduleColors))
+
+numeroModulos.30 <- mean(c(numeroModulos.30.1,numeroModulos.30.2,numeroModulos.30.3))
+```
+
+```{r}
+#mclust::adjustedRandIndex(net.30.30$moduleColors,
+                                             #net.30$moduleColors)
+
+## Indice Rand
+randNet30.1 <- mclust::adjustedRandIndex(net.30.1$moduleColors,
+                                             net$moduleColors)
+randNet30.2 <- mclust::adjustedRandIndex(net.30.2$moduleColors,
+                                             net$moduleColors)
+randNet30.3 <- mclust::adjustedRandIndex(net.30.3$moduleColors,
+                                             net$moduleColors)
+randNet30 <- mean(c(randNet30.1,randNet30.2,randNet30.3))
+```
+
+```{r}
+## Entropía
+entropyNet30.1 <- entropy.empirical(table(net.30.1$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.30.1$moduleColors))),unit = "log2")
+entropyNet30.2 <- entropy.empirical(table(net.30.2$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.30.2$moduleColors))),unit = "log2")
+entropyNet30.3 <- entropy.empirical(table(net.30.3$moduleColors),unit = "log2")/entropy.empirical(rep(1,length(unique(net.30.3$moduleColors))),unit = "log2")
+
+entropyNet30 <- mean(c(entropyNet30.1,entropyNet30.2,entropyNet30.3))
+```
+
+```{r}
+## Conectividad 
+expr.data2 <- expr.data[rownames(net.30.1$MEs),]
+
+intraNet30.1 <- intramodularConnectivity.fromExpr(
+    colors = net.30.1$moduleColors,datExpr = expr.data2,networkType = "signed")
+mean.intraNet30.1 <- apply(intraNet30.1, 2, mean)
+kWithinNet30.1 <- mean.intraNet30.1[2]
+
+expr.data2 <- expr.data[rownames(net.30.2$MEs),]
+
+intraNet30.2 <- intramodularConnectivity.fromExpr(
+    colors = net.30.2$moduleColors,datExpr = expr.data2,networkType = "signed")
+mean.intraNet30.2 <- apply(intraNet30.2, 2, mean)
+kWithinNet30.2 <- mean.intraNet30.2[2]
+
+expr.data2 <- expr.data[rownames(net.30.3$MEs),]
+
+intraNet30.3 <- intramodularConnectivity.fromExpr(
+    colors = net.30.3$moduleColors,datExpr = expr.data2,networkType = "signed")
+mean.intraNet30.3 <- apply(intraNet30.3, 2, mean)
+kWithinNet30.3 <- mean.intraNet30.3[2]
+
+kWithinNet30 <- mean(c(kWithinNet30.1,kWithinNet30.2,kWithinNet30.3))
+```
+
+```{r}
+## Anotaciones
+anotationNet.30.1 <- sum(sort(table(net.go.30.1$query.number),
+                           decreasing=T))
+moduleMeanAnotation.30.1 <- anotationNet.30.1/numeroModulos.30.1
+
+anotationNet.30.2 <- sum(sort(table(net.go.30.2$query.number),
+                           decreasing=T))
+moduleMeanAnotation.30.2 <- anotationNet.30.2/numeroModulos.30.2
+
+anotationNet.30.3 <- sum(sort(table(net.go.30.3$query.number),
+                           decreasing=T))
+moduleMeanAnotation.30.3 <- anotationNet.30.3/numeroModulos.30.3
+
+anotationNet.30 <- mean(c(anotationNet.30.1,anotationNet.30.2,anotationNet.30.3))
+moduleMeanAnotation.30 <- mean(c(moduleMeanAnotation.30.1,moduleMeanAnotation.30.2,moduleMeanAnotation.30.3))
+```
+
+```{r}
+## Anotaciones sobre el tipo de célula
+celltype.net30.1 <- genAnnotationCellType(which.one="new",
+                                    net.in=net.30.1,
+                                    return.processed = F,
+                                    doheatmap = F)
+celltype.net30.1 <- -log(celltype.net30.1)
+cell.col30.1 <- apply(celltype.net30.1, 1, sum)
+cellAnotate30.1 <- celltype.net30.1[which(cell.col30.1>5),]
+cellAnotateSum30.1 <- apply(cellAnotate30.1,1,sum)
+meanCellAnotateSum30.1 <- mean(cellAnotateSum30.1)
+celltypeAnotate30.1 <- nrow(cellAnotate30.1)
+countCell30.1=c()
+for(i in 1:nrow(cellAnotate30.1)){
+  t=0
+  for(j in 1:ncol(cellAnotate30.1)){
+    if(cellAnotate30.1[i,j]>3){
+      t=t+1
+    } else next
+  }
+  countCell30.1=c(countCell30.1,t)
+}
+meanCountCell30.1 <- mean(countCell30.1)
+
+celltype.net30.2 <- genAnnotationCellType(which.one="new",
+                                    net.in=net.30.2,
+                                    return.processed = F,
+                                    doheatmap = F)
+celltype.net30.2 <- -log(celltype.net30.2)
+cell.col30.2 <- apply(celltype.net30.2, 1, sum)
+cellAnotate30.2 <- celltype.net30.2[which(cell.col30.2>5),]
+cellAnotateSum30.2 <- apply(cellAnotate30.2,1,sum)
+meanCellAnotateSum30.2 <- mean(cellAnotateSum30.2)
+celltypeAnotate30.2 <- nrow(cellAnotate30.2)
+countCell30.2=c()
+for(i in 1:nrow(cellAnotate30.2)){
+  t=0
+  for(j in 1:ncol(cellAnotate30.2)){
+    if(cellAnotate30.2[i,j]>3){
+      t=t+1
+    } else next
+  }
+  countCell30.2=c(countCell30.2,t)
+}
+meanCountCell30.2 <- mean(countCell30.2)
+
+celltype.net30.3 <- genAnnotationCellType(which.one="new",
+                                    net.in=net.30.3,
+                                    return.processed = F,
+                                    doheatmap = F)
+celltype.net30.3 <- -log(celltype.net30.3)
+cell.col30.3 <- apply(celltype.net30.3, 1, sum)
+cellAnotate30.3 <- celltype.net30.3[which(cell.col30.3>5),]
+cellAnotateSum30.3 <- apply(cellAnotate30.3,1,sum)
+meanCellAnotateSum30.3 <- mean(cellAnotateSum30.3)
+celltypeAnotate30.3 <- nrow(cellAnotate30.3)
+countCell30.3=c()
+for(i in 1:nrow(cellAnotate30.3)){
+  t=0
+  for(j in 1:ncol(cellAnotate30.3)){
+    if(cellAnotate30.3[i,j]>3){
+      t=t+1
+    } else next
+  }
+  countCell30.3=c(countCell30.3,t)
+}
+meanCountCell30.3 <- mean(countCell30.3)
+
+
+celltypeAnotate30 <- mean(c(celltypeAnotate30.1,celltypeAnotate30.2,celltypeAnotate30.3))
+meanCellAnotateSum30 <- mean(c(meanCellAnotateSum30.1,meanCellAnotateSum30.2,meanCellAnotateSum30.3))
+meanCountCell30 <- mean(c(meanCountCell30.1,meanCountCell30.2,meanCountCell30.3))
+```
+
+
+```{r}
+## Estudio de Overlaps
+XTblBoot30.1 <- overlapTable(net$moduleColors, net.30.1$moduleColors)
+XTblBoot30.1$pTable[] = p.adjust(XTblBoot30.1$pTable,method="fdr")
+nM30.1 <- c()
+meanLogSignificance30.1 <- c()
+for(j in 1:ncol(XTblBoot30.1$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTblBoot30.1$pTable)){
+    if(XTblBoot30.1$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTblBoot30.1$pTable[i,j])
+    } else next
+  }
+  nM30.1 <- c(nM30.1,count)
+  meanLogSignificance30.1 <- c(meanLogSignificance30.1,log)
+}
+LogSignificanceMean30.1 <- mean(meanLogSignificance30.1)
+meanNM30.1 <- mean(nM30.1)
+#XTblBoot30.1$pTable <- -log10(XTblBoot30.1$pTable)
+#SumLogOverlap30.1 <- apply(XTblBoot30.1$pTable,2,sum)
+#meanSumLogOverlap30.1 <- mean(SumLogOverlap30.1)
+PercentOverlap30.1 <- c()
+for(j in 1:ncol(XTblBoot30.1$pTable)){
+  for(i in 1:nrow(XTblBoot30.1$pTable)){
+    if(XTblBoot30.1$pTable[i,j] < 0.05){
+    PercentOverlap30.1 <- c(PercentOverlap30.1,XTblBoot30.1$countTable[i,j])
+    } else next
+  }
+}
+PercentOverlap230.1 <- sum(PercentOverlap30.1)/ncol(expr.data2)
+XTblBoot30.1$pTable <- -log10(XTblBoot30.1$pTable)
+SumLogOverlap30.1 <- apply(XTblBoot30.1$pTable,2,sum)
+meanSumLogOverlap30.1 <- mean(SumLogOverlap30.1)
+
+XTblBoot30.2 <- overlapTable(net$moduleColors, net.30.2$moduleColors)
+XTblBoot30.2$pTable[] = p.adjust(XTblBoot30.2$pTable,method="fdr")
+nM30.2 <- c()
+meanLogSignificance30.2 <- c()
+for(j in 1:ncol(XTblBoot30.2$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTblBoot30.2$pTable)){
+    if(XTblBoot30.2$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTblBoot30.2$pTable[i,j])
+    } else next
+  }
+  nM30.2 <- c(nM30.2,count)
+  meanLogSignificance30.2 <- c(meanLogSignificance30.2,log)
+}
+LogSignificanceMean30.2 <- mean(meanLogSignificance30.2)
+meanNM30.2 <- mean(nM30.2)
+#XTblBoot30.2$pTable <- -log10(XTblBoot30.2$pTable)
+#SumLogOverlap30.2 <- apply(XTblBoot30.2$pTable,2,sum)
+#meanSumLogOverlap30.2 <- mean(SumLogOverlap30.2)
+PercentOverlap30.2 <- c()
+for(j in 1:ncol(XTblBoot30.2$pTable)){
+  for(i in 1:nrow(XTblBoot30.2$pTable)){
+    if(XTblBoot30.2$pTable[i,j] < 0.05){
+    PercentOverlap30.2 <- c(PercentOverlap30.2,XTblBoot30.2$countTable[i,j])
+    } else next
+  }
+}
+PercentOverlap230.2 <- sum(PercentOverlap30.2)/ncol(expr.data2)
+XTblBoot30.2$pTable <- -log10(XTblBoot30.2$pTable)
+SumLogOverlap30.2 <- apply(XTblBoot30.2$pTable,2,sum)
+meanSumLogOverlap30.2 <- mean(SumLogOverlap30.2)
+
+XTblBoot30.3 <- overlapTable(net$moduleColors, net.30.3$moduleColors)
+XTblBoot30.3$pTable[] = p.adjust(XTblBoot30.3$pTable,method="fdr")
+nM30.3 <- c()
+meanLogSignificance30.3 <- c()
+for(j in 1:ncol(XTblBoot30.3$pTable)){
+  count = 0
+  log = 0
+  for(i in 1:nrow(XTblBoot30.3$pTable)){
+    if(XTblBoot30.3$pTable[i,j] < 0.05){
+      count = count + 1
+      log = log - log10(XTblBoot30.3$pTable[i,j])
+    } else next
+  }
+  nM30.3 <- c(nM30.3,count)
+  meanLogSignificance30.3 <- c(meanLogSignificance30.3,log)
+}
+LogSignificanceMean30.3 <- mean(meanLogSignificance30.3)
+meanNM30.3 <- mean(nM30.3)
+#XTblBoot30.3$pTable <- -log10(XTblBoot30.3$pTable)
+#SumLogOverlap30.3 <- apply(XTblBoot30.3$pTable,2,sum)
+#meanSumLogOverlap30.3 <- mean(SumLogOverlap30.3)
+PercentOverlap30.3 <- c()
+for(j in 1:ncol(XTblBoot30.3$pTable)){
+  for(i in 1:nrow(XTblBoot30.3$pTable)){
+    if(XTblBoot30.3$pTable[i,j] < 0.05){
+    PercentOverlap30.3 <- c(PercentOverlap30.3,XTblBoot30.3$countTable[i,j])
+    } else next
+  }
+}
+PercentOverlap230.3 <- sum(PercentOverlap30.3)/ncol(expr.data2)
+XTblBoot30.3$pTable <- -log10(XTblBoot30.3$pTable)
+SumLogOverlap30.3 <- apply(XTblBoot30.3$pTable,2,sum)
+meanSumLogOverlap30.3 <- mean(SumLogOverlap30.3)
+
+
+meanNM30 <- mean(c(meanNM30.1,meanNM30.2,meanNM30.3))
+meanSumLogOverlap30 <- mean(c(meanSumLogOverlap30.1,meanSumLogOverlap30.2))
+PercentOverlap230 <- mean(c(PercentOverlap230.1,PercentOverlap230.2,PercentOverlap230.3))
+```
+
+### Número de módulos
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,NumeroModulos))+
+  geom_line(col="red")+
+  labs(title="Evolución del número de módulos por bootstraps", 
+       subtitle="Muestra de tamaño 30",
+       y="Número de módulos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="red")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Entropía de los módulos
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,Entropia))+
+  geom_line(col="blue")+
+  labs(title="Evolución del valor de entropía por bootstraps", 
+       subtitle="Muestra de tamaño 30",
+       y="Valor de la Entropía",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  geom_hline(yintercept = entropyGold,col = "red")+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,EntropiaNormalizada))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la entropía de las redes bootstraps \n restadas por la entropía de la gold standard", 
+       subtitle="Muestra de tamaño 30",
+       y="Entropía de las redes bootstraps menos la gold standard",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Estudio de la conectividad
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,kWithin))+
+  geom_line(col="blue")+
+  labs(title="Evolución del valor de kWithin por bootstraps", 
+       subtitle="Muestra de tamaño 30",
+       y="Valor de kWithin",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  geom_hline(yintercept = goldKWithin,col = "red")+
+  theme_gray()
+```
+
+```{r}
+indiceTamModulos3 <- df.final.30$NumeroModulos/max(df.final.30$NumeroModulos)
+
+df.final.30$IndiceTamModulos <- indiceTamModulos3
+
+df.final.30$ConectividadNormalizada <- df.final.30$IndiceTamModulos*df.final.30$kWithin
+```
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,ConectividadNormalizada))+
+  geom_line(col="blue")+
+  labs(title="Evolución del valor de kWithin normalizada previeamente según el número de módulos", 
+       subtitle="Muestra de tamaño 30",
+       y="Valor de kWithin normalizado según número de módulos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  geom_hline(yintercept = goldKWithin,col = "red")+
+  theme_gray()
+```
+
+### Estudio del índice Rand
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,IndiceRand))+
+  geom_line(col="blue")+
+  labs(title="Evolución del valor del índice Rand por bootstraps", 
+       subtitle="Muestra de tamaño 30",
+       y="Valor del índice Rand",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Estudio del número de anotaciones
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,NumeroAnotaciones))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la cantidad de anotaciones por bootstraps", 
+       subtitle="Muestra de tamaño 30",
+       y="Cantidad de Anotaciones",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  geom_hline(yintercept = anotationGold,col = "red")+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,AnotacionMediaModulo))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de anotaciones por módulo según el número de bootstrasp", 
+       subtitle="Muestra de tamaño 30",
+       y="Media de anotaciones por módulo",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  geom_hline(yintercept = moduleMeanAnotationGold,col = "red")+
+  theme_gray()
+```
+
+### Estudio sobre las anotaciones del tipo de célula
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,CountCellAnotate))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la cantidad de tipos de células significativos", 
+       subtitle="Muestra de tamaño 30",
+       y="Número de tipos de células significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,MeanCellLogAnotate))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de -log(pval) según los tipos significativos", 
+       subtitle="Muestra de tamaño 30",
+       y="Número de tipos de células significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,MeanModuleCellSignificance))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de módulos significantes con los tipos de célula significativos", 
+       subtitle="Muestra de tamaño 30",
+       y="Media de módulos significantes",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+### Estudio de Overlaps
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,MeanModulesOverlap))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media del número de módulos significativos según los overlaps con la gold standard", 
+       subtitle="Muestra de tamaño 30",
+       y="Media de módulos significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,MeanModulesOverlapMaxSignificance))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media del número de módulos \n significativos según los overlaps con la gold standard", 
+       subtitle="Muestra de tamaño 30",
+       y="Media de módulos significativos",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,MeanLogOverlap))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de -log(pval) de la tabla de Overlaps", 
+       subtitle="Muestra de tamaño 30",
+       y="Valor medio de -log(pval)",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,MeanLogOverlapSignificance))+
+  geom_line(col="blue")+
+  labs(title="Evolución de la media de -log(pval) de la tabla de Overlaps sólo con módulos significantes", 
+       subtitle="Muestra de tamaño 30",
+       y="Valor medio de -log(pval)",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df.final.30, aes(NumeroBootstraps,PercentOverlap))+
+  geom_line(col="blue")+
+  labs(title="Evolución del porcentaje de genes de la red bootstraps situados en una celda significagiva", 
+       subtitle="Muestra de tamaño 30",
+       y="Porcentaje de las redes",
+       x="Cantidad de Bootstraps",
+       color=NULL)+
+  geom_point(size=2,shape=21,fill="white",colour="blue")+
+  scale_x_continuous(breaks = df.final.30$NumeroBootstraps)+
+  scale_color_manual(labels = c("psavert", "uempmed"), 
+                     values = c("psavert"="#00ba38", "uempmed"="#f8766d"))+
+  theme_gray()
+```
+
+
+# Análisis de las tres submuestra al mismo tiempo
+
+```{r}
+df.final$Submuestra <- 10
+df.final.20$Submuestra <- 20
+df.final.30$Submuestra <- 30
+
+df <- rbind(df.final,df.final.20,df.final.30)
+
+df$Submuestra <- as.factor(df$Submuestra)
+```
+
+## Número de Módulos 
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,NumeroModulos,group = Submuestra,color=Submuestra))+
+  geom_line(aes(linetype = Submuestra))+
+  labs(title="Evolución del número de módulos por bootstraps", 
+       subtitle="Gráfica Comparativa",
+       y="Número de módulos",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  theme_gray()
+```
+
+## Entropía de los módulos
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,Entropia,group = Submuestra,color=Submuestra))+
+  geom_line()+
+  labs(title="Evolución del valor de entropía por bootstraps", 
+       subtitle="Gráfica Comparativa",
+       y="Valor de la entropía",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  geom_hline(aes(yintercept = entropyGold,linetype = "GoldStandard"),col = "red")+
+  geom_hline(aes(yintercept = entropyNet10,linetype = "RedGold10"),col = "darkgreen")+
+  geom_hline(aes(yintercept = entropyNet20,linetype = "RedGold20"),col = "darkorange")+
+  geom_hline(aes(yintercept = entropyNet30,linetype = "RedGold30"),col = "darkblue")+
+  #scale_linetype_manual(name = "NetGold", values = c(7, 7), 
+  #                    guide = guide_legend(override.aes = list(color = c("red","darkgren","darkorange","darkblue"))))+
+  theme_gray()
+```
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,EntropiaNormalizada,group = Submuestra,color=Submuestra))+
+  geom_line(aes(linetype = Submuestra))+
+  labs(title="Evolución de la entropía de las redes bootstraps \n restadas por la entropía de la gold standard", 
+       subtitle="Gráfica Comparativa",
+       y="Entropía Normalizada con respecto a la Gold Standard",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  theme_gray()
+```
+
+## Estudio de la conectividad
+
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,kWithin,group = Submuestra,color=Submuestra))+
+  geom_line()+
+  labs(title="Evolución del valor de kWithin por bootstraps", 
+       subtitle="Gráfica Comparativa",
+       y="Valor de kWithin",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  geom_hline(aes(yintercept = goldKWithin,linetype = "GoldStandard"),col = "red")+
+  geom_hline(aes(yintercept = kWithinNet10,linetype = "RedGold10"),col = "darkgreen")+
+  geom_hline(aes(yintercept = kWithinNet20,linetype = "RedGold20"),col = "darkorange")+
+  geom_hline(aes(yintercept = kWithinNet30,linetype = "RedGold30"),col = "darkblue")+
+  theme_gray()
+```
+
+```{r}
+indice10 <- df$NumeroModulos[which(df$Submuestra == 10)]/max(df$NumeroModulos[which(df$Submuestra == 10)])
+
+indice20 <- df$NumeroModulos[which(df$Submuestra == 20)]/max(df$NumeroModulos[which(df$Submuestra == 20)])
+
+indice30 <- df$NumeroModulos[which(df$Submuestra == 30)]/max(df$NumeroModulos[which(df$Submuestra == 30)])
+
+kWithinNor <- c(df$kWithin[which(df$Submuestra == 10)]*indice10,
+  df$kWithin[which(df$Submuestra == 20)]*indice20,
+  df$kWithin[which(df$Submuestra == 30)]*indice30)
+
+df$kWithinNormalizado <- kWithinNor
+```
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,kWithinNormalizado,group = Submuestra,color=Submuestra))+
+  geom_line()+
+  labs(title="Evolución del valor de kWithin normalizada \n previeamente según el número de módulos", 
+       subtitle="Gráfica Comparativa",
+       y="Valor de kWithin Normalizado",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  geom_hline(aes(yintercept = goldKWithin,linetype = "GoldStandard"),col = "red")+
+  geom_hline(aes(yintercept = kWithinNet10,linetype = "RedGold10"),col = "darkgreen")+
+  geom_hline(aes(yintercept = kWithinNet20,linetype = "RedGold20"),col = "darkorange")+
+  geom_hline(aes(yintercept = kWithinNet30,linetype = "RedGold30"),col = "darkblue")+
+  theme_gray()
+```
+
+## Estudio del índice Rand
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,IndiceRand,group = Submuestra,color=Submuestra))+
+  geom_line()+
+  labs(title="Evolución del valor del índice Rand por bootstraps", 
+       subtitle="Gráfica Comparativa",
+       y="Similitud con respecto a la Gold Standard",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  geom_hline(aes(yintercept = randNet10,linetype = "RedGold10"),col = "darkgreen")+
+  geom_hline(aes(yintercept = randNet20,linetype = "RedGold20"),col = "darkorange")+
+  geom_hline(aes(yintercept = randNet30,linetype = "RedGold30"),col = "darkblue")+
+  theme_gray()
+```
+
+## Estudio del número de anotaciones
+
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,NumeroAnotaciones,group = Submuestra,color=Submuestra))+
+  geom_line()+
+  labs(title="Evolución de la cantidad total de anotaciones por bootstraps", 
+       subtitle="Gráfica Comparativa",
+       y="Número total de Anotaciones",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  geom_hline(aes(yintercept = anotationGold,linetype = "GoldStandard"),col = "red")+
+  geom_hline(aes(yintercept = anotationNet.10,linetype = "RedGold10"),col = "darkgreen")+
+  geom_hline(aes(yintercept = anotationNet.20,linetype = "RedGold20"),col = "darkorange")+
+  geom_hline(aes(yintercept = anotationNet.30,linetype = "RedGold30"),col = "darkblue")+
+  theme_gray()
+```
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,AnotacionMediaModulo,group = Submuestra,color=Submuestra))+
+  geom_line()+
+  labs(title="Evolución de la media de anotaciones por módulo según el número de bootstrasp", 
+       subtitle="Gráfica Comparativa",
+       y="Número medio de anotaciones por módulo",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  geom_hline(aes(yintercept = moduleMeanAnotationGold, linetype = "GoldStandard"),col = "red")+
+  geom_hline(aes(yintercept = moduleMeanAnotation.10,linetype = "RedGold10"),col = "darkgreen")+
+  geom_hline(aes(yintercept = moduleMeanAnotation.20,linetype = "RedGold20"),col = "darkorange")+
+  geom_hline(aes(yintercept = moduleMeanAnotation.30,linetype = "RedGold30"),col = "darkblue")+
+  theme_gray()
+```
+
+
+
+## Estudio sobre las anotaciones del tipo de célula
+
+```{r}
+celltype.net <- genAnnotationCellType(which.one="new",
+                                    net.in=net,
+                                    return.processed = F,
+                                    doheatmap = F)
+celltype.net <- -log(celltype.net)
+cell.col <- apply(celltype.net, 1, sum)
+cellAnotate <- celltype.net[which(cell.col>5),]
+cellAnotateSum <- apply(cellAnotate,1,sum)
+meanCellAnotateSum <- mean(cellAnotateSum)
+celltypeAnotate <- nrow(cellAnotate)
+countCell=c()
+for(i in 1:nrow(cellAnotate)){
+  t=0
+  for(j in 1:ncol(cellAnotate)){
+    if(cellAnotate[i,j]>3){
+      t=t+1
+    } else next
+  }
+  countCell=c(countCell,t)
+}
+meanCountCell <- mean(countCell)
+```
+
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,CountCellAnotate,group = Submuestra,color=Submuestra))+
+  geom_line()+
+  labs(title="Evolución de la cantidad de tipos de células significativos", 
+       subtitle="Gráfica Comparativa",
+       y="Número de tipos de células significativas",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  geom_hline(aes(yintercept = celltypeAnotate, linetype = "GoldStandard"),col = "red")+
+  geom_hline(aes(yintercept = celltypeAnotate10,linetype = "RedGold10"),col = "darkgreen")+
+  geom_hline(aes(yintercept = celltypeAnotate20,linetype = "RedGold20"),col = "darkorange")+
+  geom_hline(aes(yintercept = celltypeAnotate30,linetype = "RedGold30"),col = "darkblue")+
+  theme_gray()
+```
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,MeanCellLogAnotate,group = Submuestra,color=Submuestra))+
+  geom_line()+
+  labs(title="Evolución de la media de -log10(pval) según los tipos significativos", 
+       subtitle="Gráfica Comparativa",
+       y="Número medio de -log10(pval)",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  geom_hline(aes(yintercept = meanCellAnotateSum,linetype = "GoldStandard"),col = "red")+
+  geom_hline(aes(yintercept = meanCellAnotateSum10,linetype = "RedGold10"),col = "darkgreen")+
+  geom_hline(aes(yintercept = meanCellAnotateSum20,linetype = "RedGold20"),col = "darkorange")+
+  geom_hline(aes(yintercept = meanCellAnotateSum30,linetype = "RedGold30"),col = "darkblue")+
+  theme_gray()
+```
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,MeanModuleCellSignificance,group = Submuestra,color=Submuestra))+
+  geom_line()+
+  labs(title="Evolución de la media de módulos significantes \n con los tipos de célula significativos", 
+       subtitle="Gráfica Comparativa",
+       y="Número medio de módulos significativos",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  geom_hline(aes(yintercept = meanCountCell,linetype = "GoldStandard"),col = "red")+
+  geom_hline(aes(yintercept = meanCountCell10,linetype = "RedGold10"),col = "darkgreen")+
+  geom_hline(aes(yintercept = meanCountCell20,linetype = "RedGold20"),col = "darkorange")+
+  geom_hline(aes(yintercept = meanCountCell30,linetype = "RedGold30"),col = "darkblue")+
+  theme_gray()
+```
+
+## Estudio de Overlaps
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,MeanModulesOverlap,group = Submuestra,color=Submuestra))+
+  geom_line()+
+  labs(title="Evolución del número medio de módulos significativos \n según los overlaps con la gold standard", 
+       subtitle="Gráfica Comparativa",
+       y="Número medio de módulos significativos",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  geom_hline(aes(yintercept = meanNM10,linetype = "RedGold10"),col = "darkgreen")+
+  geom_hline(aes(yintercept = meanNM20,linetype = "RedGold20"),col = "darkorange")+
+  geom_hline(aes(yintercept = meanNM30,linetype = "RedGold30"),col = "darkblue")+
+  theme_gray()
+```
+
+
+<!-- ```{r} -->
+<!-- ggplot(df, aes(NumeroBootstraps,MeanModulesOverlapMaxSignificance,group = Submuestra,color=Submuestra))+ -->
+<!--   geom_line(aes(linetype = Submuestra))+ -->
+<!--   labs(title="Evolución del número medio de módulos significativos \n según los overlaps con la gold standard",  -->
+<!--        subtitle="Gráfica Comparativa", -->
+<!--        y="Número medio de módulos significativos", -->
+<!--        x="Cantidad de Bootstraps", -->
+<!--        colour="Tamaño de Submuestra")+ -->
+<!--   geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+ -->
+<!--   scale_x_continuous(breaks = df$NumeroBootstraps)+ -->
+<!--   #scale_color_manual(labels = c("psavert", "uempmed"),  -->
+<!--                      #values = c("psavert"="#00ba38", -->
+<!--                       #          "uempmed"="#f8766d"))+ -->
+<!--   scale_color_brewer(palette="Dark2")+ -->
+<!--   theme_gray() -->
+<!-- ``` -->
+
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,MeanLogOverlap,group = Submuestra,color=Submuestra))+
+  geom_line()+
+  labs(title="Evolución de la media de -log(pval) de la tabla de Overlaps", 
+       subtitle="Gráfica Comparativa",
+       y="Valor medio de -log10(pval)",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  geom_hline(aes(yintercept = meanSumLogOverlap10,linetype = "RedGold10"),col = "darkgreen")+
+  geom_hline(aes(yintercept = meanSumLogOverlap20,linetype = "RedGold20"),col = "darkorange")+
+  geom_hline(aes(yintercept = meanSumLogOverlap30,linetype = "RedGold30"),col = "darkblue")+
+  theme_gray()
+```
+
+
+<!-- ```{r} -->
+<!-- ggplot(df, aes(NumeroBootstraps,MeanLogOverlapSignificance,group = Submuestra,color=Submuestra))+ -->
+<!--   geom_line(aes(linetype = Submuestra))+ -->
+<!--   labs(title="Evolución de la media de -log(pval) de la tabla de Overlaps \n sólo con módulos significantes",  -->
+<!--        subtitle="Gráfica Comparativa", -->
+<!--        y="Valor medio de -log10(pval)", -->
+<!--        x="Cantidad de Bootstraps", -->
+<!--        colour="Tamaño de Submuestra")+ -->
+<!--   geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+ -->
+<!--   scale_x_continuous(breaks = df$NumeroBootstraps)+ -->
+<!--   #scale_color_manual(labels = c("psavert", "uempmed"),  -->
+<!--                      #values = c("psavert"="#00ba38", -->
+<!--                       #          "uempmed"="#f8766d"))+ -->
+<!--   scale_color_brewer(palette="Dark2")+ -->
+<!--   theme_gray() -->
+<!-- ``` -->
+
+
+```{r}
+ggplot(df, aes(NumeroBootstraps,PercentOverlap,group = Submuestra,color=Submuestra))+
+  geom_line()+
+  labs(title="Evolución del porcentaje de genes de la red bootstraps \n situados en una celda significagiva", 
+       subtitle="Gráfica Comparativa",
+       y="Porcentaje de genes significativos",
+       x="Cantidad de Bootstraps",
+       colour="Tamaño de Submuestra")+
+  geom_point(size=2,shape=21,fill="white",aes(color=Submuestra))+
+  scale_x_continuous(breaks = df$NumeroBootstraps)+
+  #scale_color_manual(labels = c("psavert", "uempmed"), 
+                     #values = c("psavert"="#00ba38",
+                      #          "uempmed"="#f8766d"))+
+  scale_color_brewer(palette="Dark2")+
+  geom_hline(aes(yintercept = PercentOverlap210,linetype = "RedGold10"),col = "darkgreen")+
+  geom_hline(aes(yintercept = PercentOverlap220,linetype = "RedGold20"),col = "darkorange")+
+  geom_hline(aes(yintercept = PercentOverlap230,linetype = "RedGold30"),col = "darkblue")+
+  theme_gray()
+```
+
+
+
+# Conclusiones
+
+Durante esta sección introduciremos y analizaremos los resultados obtenidos en la simulación. Tal y cómo hemos indicado en la metodología, inicialmente veremos cómo se ha comportado el método tomando la submuestra de tamaño $190$. Es aquí dónde encontramos el primer inconveniente que tiene la creación de redes de co-expresión, se observa claramente la falta de estabilidad del método. Para ello, hacemos uso del índice Rand, es decir, comparamos la similitud de las dos redes creadas con la submuestra de tamaño $190$ con la red gold standard. La red de $20$ bootstraps tiene un índice Rand de $0.27$, mientras que la de $40$ bootstraps aumenta a $0.3$. Si tenemos en cuenta que este índice se mueve entre $0$ y $1$, estamos bastante lejos de tener una alta similitud. 
+
+Esto hay que tenerlo muy en cuenta, puesto que, si tenemos esos valores tan bajos para una muestra cercana a la original, es lógico pensar que con las submuestra de pequeño tamaño tendremos unos resultados bastante pobres. Sin embargo, esto del índice Rand lo podemos interpretar cómo un valor de `accuracy` del método. En ese sentido, si la red gold standard tiene $56$ módulos, un algoritmo aleatorio tendría una cierto por debajo del 2%. Por lo tanto, tener un índice Rand de $0.3$ es bastante alto si tenemos esto presente.
+
+Partiendo de esta base, comenzaremos a discutir los resultados obtenidos en la creación de las diferentes redes de co-expresión comentadas anteriormente.
+
+Lo primero que podemos observar, de manera más general, es que las redes creadas a partir de la meustra de tamaño $n=10$ tienen muy poca información. Existen ciertos puntos en los que sus gráficas se diferencia mucho del resto de redes con un tamaño de submuestra mayor. Fijémonos sobre todo en las gráficas correspondientes al `indice Rand`, el `número medio de anotaciones por módulo` o en la evolución de la `media de -log10(pval) según los overlaps`. Se observa claramente esa diferencia que hemos mencionado, y esque el salto que hay entre un tamaño de $n=10$ a uno de $n=20$ es mucho mayor que el sato existente entre $n=20$ y $n=30$. En este sentido, estamos viendo que tener una submuestra de tamaño $n=10$ no es lo suficientemente grande si queremos tener una buena aproximación respecto a la gold standard. Pero cuidado, existen ciertos aspectos en los que seguimos estando muy lejos de la gold standard cómo puede ser el número total de anotaciones que tenemos. Evidentemente, cuanta más muestra tengamos, mejores resultados obtendremos, sin embargo, vemos cómo las redes con tamaño $n=20$ y $n=30$ ya comienzan a ser mucho mucho más completas y con cierta información importante. 
+
+Por otro lado está el tema del número de bootstraps. Cómo podemos ver, a medida que aumentamos el valor de $b$ el número de módulos de la red va disminuyendo y estos se van haciendo más compactos, algo que podemos ver en las gráficas correspondientes al número de módulos y a la evolución de la entropía. En este sentido valores intermedios de $b$ son los que mejor se están comportando, puesto que ni nos aproximamos tanto al valor $1$ de entropía normalizada, ni disminuímos tanto el número de módulos. El tema de la conectividad es un concepto más subjetivo, y es que este depende mucho más del número de submuestra que tengamos, puesto que observamos que cuanto mayor es dicho tamaño, mejor está calculando el método las correlaciones entre los genes y más se acerca a la conectividad media de la gold standard. Por otra parte, cómo es de esperar conforme aumenta el número de módulos, dicha conectividad se ve aumentada, es por eso por lo que normalizamos dicha conectividad con respecto al número de módulos que tenemos en las distintas redes bootstras de los correspondientes tamaños de muestra. Es ahí, en dicha gráfica, dónde sí observamos esa tendencia decreciente que cada vez se aproxima más al valor de conectividad de la gold standard, es decir, el aumento del número de bootstraps favorece al cálculo correcto de la conectividad. Ahora bien, esa caída es menos pronunciada a partir de los valores de $b=30,35$, por lo que si tenemos en cuenta lo que hemos comentado anteriormente sobre el número de módulos y la entropía, no deberíamos de aumentar mucho más el número de bootstraps a realizar puesto que, no vemos una mejora pronunciada con respecto a la conectividad y, además, tendríamos los malos valores comentados sobre los términos anteriores.
+
+Con respecto al `índice Rand` no hay mucho más que comentar, hemos visto su evolución respecto al tamaño de muestra. De hecho, siempre estamos por encima del porcentaje aleatorio que hemos comentado al inicio de la sección. Sin embargo, no se llega a observar una clara mejoría con el aumento del número de bootstraps, es más, en las curvas correspondientes a los tamaños $n=10$ y $n=20$ parece que incluso se está produciendo una decadencia. Sin embargo, con $n=30$ si parece existir una curva ascendente. Sin embargo, estos valores no tienen una alta variabilidad, puesto que los aumentos o disminuciones son mínimas con respecto al valor de partida inicial.
+
+Analizaremos ahora el contenido biológico, es decir, las anotaciones realizadas tanto sobre los términos de Gene Ontology, cómo las anotaciones sobre el tipo de célula. La cantidad total de anotaciones realizadas nos aporta mucha información, puesto que a simple vista no posee alteraciones relevantes, manteniendose en un plano más constante, en perspectiva con respecto a las anotaciones que tenemos sobre la gold standard. La media de anotaciones sí es una gráfica bastante significativa, y es que, se observa un crecimiento casi continuo en las gráficas. Y digo casi puesto que, existen valores de $b$ en los que dichas gráficas alcanzan su máximo, decayendo a partir de ese momento. Si nos fijamos bien, ese punto máximo parece que se reduce con respecto al aumento del tamaño de submuestra. De este modo, seguimos con la tónica anterior de escoger un número de bootstraps intermedio. En cuanto a las anotaciones sobre el tipo de célula parece algo más complicado extraer alguna conclusión en claro puesto que sus gráficas parecen dar una información un tanto difusa. Inicialmente nos vamos al número medio de módulos significativos con los tipos de célula singificativos obtenidos. En este caso, salvo en el caso de la gráfica con $n=20$, parece existir un decrecimiento. Y, de hecho en esa misma gráfica el crecimiento viene dado a partir del valor de $b=25$. Por otro lado, el crecimiento o decrecimiento expresado no es muy pronunciado teniendo en cuenta los rangos en los que se mueven nuestros ejes. Mientras tengamos una media por debajo de $2$ parece que estamos teniendo unos resultados aceptables. Con respecto a la cantidad de tipos de células significativos parece existir una cierta tendencia al crecimiento, sobre todo con respecto a $n=30$. Sin embargo, con respecto a las otras dos gráficas lo que podemos observar es una cierta tendencia a tener más células significativas, aunque, por otro lado, estamos perdiendo cantidad de $-log_{10}(pval)$. Este decrecimiento es mucho más significativo que el crecimiento comentado anterior, de hecho, la gráfica de $n=20$ apenas se aprecia, puesto que prácticamente se mantiene constante en media. En ese sentido, si no queremos perder mucha cantidad de significancia, en cuanto a $-log_{10}(pval)$ ser refiere, también nos deberíamos de quedar en unos valores de bootstraps intermedios.
+
+Por último, en cuanto a los overlaps se refiere se aprecia, en primer lugar un pequeño crecimiento del número medio de módulos significativos por cada módulo de la gold standard. Sin embargo, si miramos la gráfica realizada sobre una significancia mayor, observamos cómo ese crecimiento es poco pronunciado teniendo en cuenta los rangos en los que nos movemos. Por otro lado, también observamos un crecimiento, este sí, más pronunciado que el anterior sobre la media de la cantidad de $-log_{10}(pval)$. En este sentido, estamos viendo más módulos significativos y, a su vez, mayor cantidad de significancia, luego mantenernos en números intermedios de bootsraps, de nuevo, ayudaría a mantener la positividad de estas dos consideraciones. Para terminar está el porcentaje de genes de la red bootstraps situados en una celda significativa. En este caso, el decrecimiento respecto al tamaño de $n$ es considerativo. Sin embargo, en cuanto a la evolución de los bootstraps poco se puede decir, y es que si es verdad que en las gráficas de $n=10$ y $n=20$ se observa un decrecimiento, el cual no se observa con $n=30$.
+
