@@ -1,0 +1,423 @@
+---
+title: "Implementación y Resultados"
+author: "Jose Antonio Castellón García"
+date: "8/6/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+    theme: united
+    highlight: tango
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,message=FALSE}
+library(CoExpNets)
+library(CoExpROSMAP)
+CoExpROSMAP::initDb()
+library(reshape2)
+library(ggplot2)
+library(WGCNA)
+```
+
+```{r}
+# Cargamos la base de datos disponible
+expr.data = getExprDataFromTissue(tissue="notad",
+                                  which.one="CoExpROSMAP")
+
+# Cargamos la red
+net = getNetworkFromTissue(which.one="CoExpROSMAP",tissue="notad")
+
+
+# Seleccionamos una submuestra de tamaño 190
+set.seed(12345)
+exp.data2 <- expr.data[sample(nrow(expr.data),190),]
+```
+
+
+# Implementación
+
+Durante esta sección explicaremos cómo hemos llevado a cabo la implementación del código necesario para realizar la correspondiente simulación, introduciendo los métodos y funciones necesarias. Para ello tomaremos cómo ejemplo las redes realizadas sobre la primera submuestra de tamaño $190$, tal y cómo hemos explicado en el apartado de metodología. Estas redes, además de servinos cómo primer ejemplo de explicación, nos dará una primera idea en cuanto al tamaño de bootstraps necesario. Cabe destacar que esto es sólo un ejemplo de implementación, para mostrar el código utilizado para la simulación. Los resultados que puedan salir en las disintas funciones comparativas o gráficas que veremos serán analizados en profundidad en la sección posterior.
+
+## Script de Lanzamiento
+
+Presentamos, inicialmente, el script realizado para la ejecución de las redes. En este caso, las redes están realizados con $20$ y $40$ bootstraps respctivamente. Como podemos observar, ejecutamos el método `getBootstrapNetwor` presentado en la introducción, habiendo cargado previamente los paquetes necesarios y realizando la selección aleatoria de una submuestra de tamaño $190$. 
+
+```{r,eval=FALSE}
+library(CoExpNets)
+library(CoExpROSMAP)
+CoExpROSMAP::initDb()
+library(WGCNA)
+WGCNA::enableWGCNAThreads(8)
+
+# Cargamos la base de datos disponible
+expr.data = getExprDataFromTissue(tissue="notad",
+                                  which.one="CoExpROSMAP")
+
+# Seleccionamos una submuestra de tamaño 190
+set.seed(12345)
+exp.data2 <- expr.data[sample(nrow(expr.data),190),]
+
+start.time1 <- Sys.time()
+# Lanzamos el proceso de creación de la red bootstrap
+set.seed(12345)
+getBootstrapNetwork(mode = "bootstrap",expr.data = exp.data2, 
+                    job.path = "results20/",
+                    removeTOMF = TRUE, blockTOM = TRUE,
+                    annotateFinalNet = TRUE,
+                    b = 20)
+end.time1 <- Sys.time()
+
+tiempoEjecucion1 <- end.time1 - start.time1
+print(tiempoEjecucion1)
+
+start.time2 <- Sys.time()
+# Lanzamos el proceso de creación de la red bootstrap
+set.seed(12345)
+getBootstrapNetwork(mode = "bootstrap",expr.data = exp.data2, 
+                    job.path = "results40/",
+                    removeTOMF = TRUE, blockTOM = TRUE,
+                    annotateFinalNet = TRUE,
+                    b = 40)
+end.time2 <- Sys.time()
+
+tiempoEjecucion2 <- end.time2 - start.time2
+print(tiempoEjecucion2)
+```
+
+
+## Métodos Comparativos
+
+Una vez haya terminado el proceso de creación, deberemos de extraer los datos necesarios para elaborar un proceso de comaparación de manera que nos permita evaluar la diferencia entre una red bootstrap y la red dada con todas las muestras. 
+
+Antes de nada, tendremos que cargar el archivo correspondiente a la red:
+
+```{r}
+net.190.20 <- readRDS("netBootBootstrap.9.it.50.b.20.rds")
+```
+
+Teniendo las redes cargadas se puede empzar con el proceso de comparación. Para ello utilizaremos varias funciones con el fin de comparar las dos redes bootstraps con la red dada a partir de todas las muestras. Se realizan varios pasos, el primero de todos, comienza con la extracción de los datos más basicos de la red. De esta forma podemos saber cuántos módulos se han creado en cada una de las redes bootstraps.
+
+```{r}
+length(unique(net.190.20$moduleColors))
+```
+
+También podemos saber cuántos genes hay en cada unos de los módulos.
+
+```{r}
+sort(table(net.190.20$moduleColors),decreasing = T)
+```
+
+Esto ya nos puede dar una primera idea sobre la difreneciación que existe entre ambas redes.
+
+Es aquí dónde introducimos la primera función comparativa.  Esta función viene integrada en el paquete `CoExpNets` y nos da una gráfica con los overlaps entre módulos de dos redes de co-expresión dadas.
+
+```{r,echo=FALSE}
+genCrossTabPlot <- function(colors1,
+                            colors2,
+                            tissue1="Net 1",
+                            tissue2="Net 2",
+                            plot.file=NULL){
+
+  #We create a simple crosstab
+  XTbl <- overlapTable(colors1, colors2)
+  XTbl$pTable[] = p.adjust(XTbl$pTable,method="fdr")
+  toreturn = XTbl$pTable
+  #print(XTbl)
+  # Truncate p values smaller than 10^(-50) to 10^(-50)
+  XTbl$pTable <- -log10(XTbl$pTable)
+  #XTbl$pTable[is.infinite(XTbl$pTable)] = 1.3*max(XTbl$pTable[is.finite(XTbl$pTable)])
+  XTbl$pTable[XTbl$pTable>50 ] = 50
+
+  # Marginal counts (really module sizes)
+  ModTotals.1 = apply(XTbl$countTable, 1, sum)
+  ModTotals.2 = apply(XTbl$countTable, 2, sum)
+  if(!is.null(plot.file)){
+    pdf(plot.file,height=14,width=18)
+    print(paste0("Saving new plot ",plot.file))
+
+  }
+  par(mar=c(15, 12, 2.7, 1)+0.4)
+
+  # Use function labeledHeatmap to produce the color-coded table
+  #with all the trimmings
+  labeledHeatmap(Matrix = XTbl$pTable,
+                 yLabels = paste(" ", names(ModTotals.1)),xLabels = paste(" ",
+                                                                          names(ModTotals.2)),colorLabels = TRUE,
+                 textMatrix =XTbl$countTable,colors = greenWhiteRed(100)[50:100],
+                 ySymbols = paste(names(ModTotals.1)," : ", ModTotals.1, sep=""),
+                 xSymbols = paste(names(ModTotals.2)," : ", ModTotals.2, sep=""),
+                 main = paste0("Correspondence of ", tissue1," (rows) and ", tissue2, " (columns) modules",sep=""),
+                 cex.text = 0.8, cex.lab = 1.0, setStdMargins = FALSE, plotLegend= TRUE)
+  if(!is.null(plot.file))
+    dev.off()
+  return(toreturn)
+}
+```
+
+A modo de ejemplo, ejecutamos la función tomando la red con todas las muestras y la red realizada con $20$ bootstraps a partir de la submuestra de tamaño $190$. 
+
+```{r,fig.width=15,fig.height=15}
+genCrossTabPlot(net$moduleColors,net.190.20$moduleColors)
+```
+
+A continuación presentamos otra función realizada durante el aprendizaje necesario para la elaboración de este proyecto. Se trata de una función que muestra diferentes valores del índice Rand en la evolución de los bootstraps realizados sobre una red de co-expresión dada. 
+
++ `rdiffs`: `Succesive Rand Simmilarities`. Se define cómo el índice Rand establecido al pasar de la muestra bootstraps $i$ a la muestra $i+1$. 
+
++ `fdiffs`: `Simmilarities with final net`. Se define cómo el índice Rand entre la red dada por la muestra bootstraps $i$ y la red bootstrap final devuelta por el método.
+
++ `adiffs`: `Simmilarities with canonical net`. Se define cómo el índice Rand correspondiente entre la red dada por la muestra bootstraps $i$ y la red realizada tomando todas las muestras.
+
+Con esto lo que se pretendía estudiar, en un primer momento, era la evolución del método de bootstrapping en cuanto a la cantidad de bootstraps utilizados. Es decir, cómo varía el índice Rand al pasar de una red de, por ejemplo, $5$ bootstraps a una red con $6$ bootstraps. Sin embargo, hacer esto conlleva un coste informática muy alto. En este caso, la función lo que hace es observar la evolución del bootstraps respecto a un red dada con una cierta cantidad de remuestreos realizados. 
+
+Supongamos que estamos trabajando con la red bootstrap, realizada a partir de la submuestra de tamaño $190$, de $20$ bootstraps. Los remuestreos tomados, lo que se denomina muestra bootstraps, están seleccionados en un orden aleatorio. En primer lugar, lo que hacemos es ordenar estas muestras bootstraps, de manera aleatoria, tantas veces cómo el parámetro `size` indique, por ejemplo, tomando un valor de $size=50$. Teniendo esto, calculamos las distintas definiciones del índice Rand vistas antes sobre todos estos órdenes aleatorios. Por ejemplo, para `rdiffs`, en este caso, tendríamos una lista de tamaño $50$ establecida por esos órdenes aleatorios escogidos, en el que cada elemento de la lista es un vector que muestra la evolución del índice Rand, al pasar de la muestra de bootstrap $i$ a la muestra $i+1$. Por ejemplo, en primera posición tendríamos el índice Rand calculado entre la muestra de bootstrap $1$ y la muestra $2$. En este caso, estas posiciones de los vectores son diferentes en cada una de las cincuenta reordenadocioens realizadas. Teniendo esto, lo que hacemos es formar vectores de posiciones, a los que le calculamos la muestra, que será el valor representado en la gráfica final. Esto nos habla de la estabilidad del método, en el que, cuanto más bootstraps metamos, mejores resultados tendremos y, sobre todo, menos variación en la gráfica final.
+
+
+```{r}
+plot.Bootstrap.Evolution <- function(net,size,net.all){
+  rdiffs = list(NULL)
+  fdiffs = NULL
+  adiffs = NULL
+  clusters = list(NULL)
+  randomIndexes = NULL
+
+  indexes = names(net$subnets)
+  if(is.null(indexes)){
+      indexes = 1:length(net$subnets)
+  }
+
+  # Con esto creamos 50 ordenes aleatoriores de las redes
+  for(i in 1:size){
+    randomIndexes[[i]] <- sample(1:length(net$subnets),length(net$subnets))
+  }
+
+  for(i in 1:length(randomIndexes)){
+    clusters[[i]] <- matrix(ncol = length(names(net$moduleColors)))
+    for(j in randomIndexes[[i]]){
+      clusters[[i]] <- rbind(clusters[[i]],net$subnets[[j]]$subcluster)
+    }
+    clusters[[i]] <- clusters[[i]][-1,]
+  }
+  
+  # Mismo código que aparece en plot.bootnet para cargar la red con todas las muestras.
+  # if(!is.null(net$allsamplesnet))
+  #       cat("It seems to be an all samples net\n")
+  #       if(typeof(net$allsamplesnet) == "character"){
+  #         cat("Getting the network from file",net$allsamplesnet,"\n")
+  #         if(file.exists(net$allsamplesnet))
+  #           net$allsamplesnet = readRDS(net$allsamplesnet)
+  #         else{
+  #           cat("There is no file",net$allsamplesnet,", we´ll skip this part\n")
+  #           net$allsamplesnet = NULL
+  # 
+  #         }
+  # 
+  #       }
+  net$allsamplesnet = net.all
+  
+  # Calculamos los índices Rand bajo los distintos criterios exactamente igual que hemos explicado 
+  # anteriormente. 
+  for(i in 1:length(clusters)){
+    rdiffs[[i]] <- vector()
+    fdiffs[[i]] <- vector()
+    adiffs[[i]] <- vector()
+    for(j in 2:nrow(clusters[[i]])){
+      rdiffs[[i]] =
+        c(rdiffs[[i]],
+          mclust::adjustedRandIndex(clusters[[i]][j-1,],
+          clusters[[i]][j,]))
+      
+      fdiffs[[i]] =
+        c(fdiffs[[i]],mclust::adjustedRandIndex(clusters[[i]][j-1,],
+        net$moduleColors))
+      
+      if(!is.null(net$allsamplesnet))
+        adiffs[[i]] =
+          c(adiffs[[i]],
+            mclust::adjustedRandIndex(clusters[[i]][j-1,],
+            net$allsamplesnet$moduleColors))
+    }
+        
+        
+  }
+  
+  # Creamos la lista de las posiciones correspondientes para cada vector de índice Rand.
+  posRdiffs <- list()
+  posFdiffs <- list()
+  posAdiffs <- list()
+  for(i in 1:length(rdiffs[[1]])){
+    # Indicamos que cada elemento de la lista se corresponde con un vector
+    posRdiffs[[i]] <- vector()
+    posFdiffs[[i]] <- vector()
+    if(!is.null(adiffs))
+      posAdiffs[[i]] <- vector()
+  }
+  t=0
+  for(j in 1:length(rdiffs[[i]])){
+    t=t+1
+    for(i in 1:length(rdiffs)){
+      # Guardamos esas posiciones en un mismo vector. Esta lista tendrá un tamaño igual al número de bootstraps 
+      # realizados, menos uno, y cada vector tendrá un tamaño igual al número de ordenaciones que queramos 
+      # indicar a través del parámetro 'size'.
+      posRdiffs[[t]] <- c(posRdiffs[[t]],rdiffs[[i]][j])
+      posFdiffs[[t]] <- c(posFdiffs[[t]],fdiffs[[i]][j])
+      if(!is.null(adiffs))
+        posAdiffs[[t]] <- c(posAdiffs[[t]],adiffs[[i]][j])
+    }
+  }
+
+  # Calculamos la media de las posiciones
+  mediaPosRdiffs <- NULL
+  mediaPosFdiffs <- NULL
+  mediaPosAdiffs <- NULL
+  for(i in 1:length(posRdiffs)){
+    mediaPosRdiffs <- c(mediaPosRdiffs,mean(posRdiffs[[i]]))
+    mediaPosFdiffs <- c(mediaPosFdiffs,mean(posFdiffs[[i]]))
+    if(!is.null(adiffs))
+      mediaPosAdiffs <- c(mediaPosAdiffs,mean(posAdiffs[[i]]))
+  }
+  
+  # Mostramos por pantalla estas medias de los diferentes cálculos del índice Rand
+  cat("Means of rdiffs","\n")
+  print(mediaPosRdiffs)
+  cat("\n")
+  cat("Means of fdiffs","\n")
+  print(mediaPosFdiffs)
+  if(!is.null(adiffs))
+    cat("\n")
+    cat("Means of adiffs","\n")
+    print(mediaPosAdiffs)
+    
+    # Ahora quiero hacer uso del paquete ggplot para representar la evolución de este vector de medias 
+    # en las diferentes posiciones.
+    
+    # Inicialmente creo un data frame que tiene tres columnas, indicanco la posición, la media de rdiffs 
+    # y la media de fdiffs. 
+    df <- data.frame("Posicion" = c(1:length(mediaPosRdiffs)),
+                     "rdiffs" = mediaPosRdiffs, 
+                     "fdiffs" = mediaPosFdiffs)
+    
+    # Con la función melt podemos meltear el data frame anterior. De este modo, tendremos de nuevo otras tres 
+    # columnas, la primera de posición que no cambia. La segunda, la variable de medición, es un factor de dos 
+    # niveles corresponientes a rdiffs y fdiffs, esta columna es la que recibe el nombre de RandIndex. 
+    # Por último, la última variable indica el valor de rdiffs o fdidffs en la posición indicada.
+    df <- melt(data = df,id.vars = "Posicion",
+               measure.vars = c("rdiffs","fdiffs"),
+               variable.name = "RandIndex")
+    # Pongo así el data frame puesto que de esta manera es más fácil la creación del gráfico.
+    
+    # Ahora hacemos lo mismo, esta vez introduciendo las medias de adiffs
+    if(!is.null(adiffs))
+      df <- data.frame("Posicion"=c(1:length(mediaPosRdiffs)),"rdiffs" = mediaPosRdiffs,
+                       "fdiffs" = mediaPosFdiffs,
+                       "adiffs" = mediaPosAdiffs)
+    
+    df <- melt(data = df,id.vars = "Posicion",
+               measure.vars = c("rdiffs","fdiffs","adiffs"),
+               variable.name = "RandIndex")
+    
+    # Creamos la gráfica con ggplot
+    
+    # En el eje x indicamos la posición, en el eje y la columna value, que indica el valor correspondiente en 
+    # cada posición y, por último, coloremaos y agrupamos según la variable de tipo factor RandIndex 
+    # cuyos niveles son las tres formas de calcular el índice Rand.
+    ggplot(df,aes(x = Posicion, y = value, color = RandIndex,
+                  group = RandIndex))+
+      geom_line()+
+      scale_color_manual(name="Rand Index",
+                         values = c("black","red","blue"),
+                         labels = c("Succesive Rand simmilarity",
+                                "Simmilarity with final net",
+                                "Simmilarity with cannonical net"))+
+      ggtitle("Bootstrap Evolution")+
+      theme(plot.title = element_text(hjust = 0.5))+
+      xlab("Number of subnets")+ 
+      ylab("Rand simmilarities")+
+      theme(axis.text.x = element_text(size = 14), 
+            axis.title.x = element_text(size = 16),
+            axis.text.y = element_text(size = 14), 
+            axis.title.y = element_text(size = 16),
+            plot.title = element_text(size = 20, face = "bold"),
+            legend.title = element_text(size = 19),
+            legend.text = element_text(size = 15))
+    
+    # También podmeos plotear de manera tradicional, cómo viene en el método de plot.bootnet
+    # plot(mediaPosRdiffs,type="lp",
+    #      col="black",main="Bootstrap evolution", 
+    #      xlab="Number of subnets",ylab="Rand simmilarities",
+    #      xlim = c(0,30))
+    # if(!is.null(adiffs))
+    #   lines(mediaPosAdiffs,col="blue")
+    # lines(mediaPosFdiffs,col="red")
+    # legend("topleft",
+    #      legend = c("Succesive Rand simmilarity",
+    #                 "Simmilarity with final net",
+    #                 "Simmilarity with cannonical net"),
+    #      fill=c("black","red","blue"))
+  
+  
+}
+```
+
+Mostramos un ejemplo del funcionamiento de la función. Le pasamos la red realizada con $20$ bootstraps y la red canónica con todas las muestras, devolviendo una gráfica comentada anteriormente.
+
+```{r,fig.width=12,fig.height=10}
+plot.Bootstrap.Evolution(net = net.190.20, size = 50, net.all = net)
+```
+
+
+Sin embargo, cómo se ha comentado el principal método comparativo de dos redes co-expresión es el índice Rand. En este caso, ya hemos introducido la función necesaria para calcular dicho índice en R. Siguiendo con el ejemplo introducido, para calcular el índice Rand entre la red con todas las muestras y la red producida con $20$ bootstraps a partir de la submuestra de tamaño $190$ sería de la siguiente forma:
+
+```{r}
+mclust::adjustedRandIndex(net$moduleColors,(net.190.20$moduleColors))
+```
+
+
+# Análisis de Resultados
+
+Lo primero es analizar la cantidad y calidad de los módulos obtenidos en las redes bootstraps con respecto a la red dada por todas las muestras. En esta red total tenemos un total de $56$ módulos. Sin embargo, cómo hemos podido observar, en la red ejecutada a partir de las $190$ muestras y $20$ bootstraps tenemos sólo $20$ módulos obtenidos, lo que nos da un cambio bastante significante. Por último, podemos ver los módulos observados en la red realizada con $40$ bootstraps para observar la diferencia con respecto a la anterior.
+
+
+```{r}
+net.190.40 <- readRDS("netBootBootstrap.9.it.50.b.40.rds")
+
+length(unique(net.190.40$moduleColors))
+```
+
+
+En este caso observamos una mínima mejoría, subiendo el número de módulos a $24$, aunque aún se nos queda bastante lejos de la red inicial dada. 
+
+En el estudio de `Overlaps` podemos ver cómo se relacionan los módulos de las correspondientes red bootstraps y la red inicial. Primero con la red con $40$ bootstraps y, posteriormente con la red de $20$ bootstraps. 
+
+```{r,fig.width=15,fig.height=15}
+genCrossTabPlot(net.190.40$moduleColors,net$moduleColors)
+```
+
+```{r,fig.width=15,fig.height=15}
+genCrossTabPlot(net.190.20$moduleColors,net$moduleColors)
+```
+
+Sin embargo, lo que nos interesa de verdad a la hora de estudiar la comparativa entre las redes es el ya mencionado índice Rand. Cabe destacar que hemos seleccionado una submuestra de tamaño $190$, sólo $10$ ejemplares menos que en la red inicial con todos las muestras originales. Observamos cómo un pequeño cambia en el tamaño de la muestra ya está provocando una gran variación en la red de co-expresión final. Es verdad que hemos utilizado un tamaño de bootstraps pequeño, para iniciarnos en el problema e intentar intuir a partir de aquí los bootstraps necesarios para tener un buen resultado. 
+
+El ínice rand entre la red inicial y la red de $20$ bootstraps de de $0.27$ cómo podemos ver:
+
+```{r}
+mclust::adjustedRandIndex(net$moduleColors,(net.190.20$moduleColors))
+```
+
+Añadiéndole $20$ bootrstraps más nos vamos a un valor de $0.3$:
+
+```{r}
+mclust::adjustedRandIndex(net$moduleColors,net.190.40$moduleColors)
+```
+
+Recordemos que, el índice Rand, se mueve en el intervalo $[0,1]$. Un valor cercano a uno indicaría una gran similitud entre las dos redes, sin embargo, es lo contrario a lo que está ocurriendo en nuestro problema inicial. Ese valor de $0.3$ nos está diciendo, como he dicho, todo lo contrario, es decir, las dos redes de co-expresión apenas se parecen entre sí. Algo que ya podíamos intuir al observar el número de clúster correspondientes en ambas redes y en su correspondiente gráfica de overlaps.
+
+Lo que nos indica todo esto es que con una mínima variación ya nos están haciendo falta una gran cantidad de bootstraps para intentar reproducir la red de co-expresión inical. En procesos siguientes trabajaremos con tamaños mucho más grandes de bootstraps e iremos bajando el tamaño de la submuestra poco a poco. Lo próximo será intentar tener una red lo más parecida a la inicial con un tamaño de submuestra de $190$. Una vez la tengamos, estudiaremos, en base a los resultados extraídos, cuantos bootstraps necesitamos con una submuestra de tamaño $180$ y así progresivamente hacia abajo, para intentar intuir la variación producida al ir eliminando $10$ muestras.

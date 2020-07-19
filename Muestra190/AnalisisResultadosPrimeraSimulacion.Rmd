@@ -1,0 +1,592 @@
+---
+title: "Analisis de Resultados sobre la Primera Simulacion"
+author: "Jose Antonio Castellón García"
+date: "11/6/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    df_print: paged
+    theme: united
+    highlight: tango
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(kableExtra)
+library(dplyr)
+```
+
+
+# Implementación 
+
+Cargamos las librerías correspondientes.
+
+```{r,message=FALSE}
+library(CoExpNets)
+library(CoExpROSMAP)
+CoExpROSMAP::initDb()
+library(reshape2)
+library(ggplot2)
+library(WGCNA)
+library(BioQC)
+library(readxl)
+```
+
+
+Del paquete `CoExpROSMAP`, podemos extraer tanto los datos correspondientes a la matriz de expresión y la red de co-expresión realizada tomando todos los ejemplerares de la muestra. Esta red la denominaremos cómo `gold standard`.
+
+
+```{r}
+# Cargamos la base de datos disponible
+expr.data = getExprDataFromTissue(tissue="notad",
+                                  which.one="CoExpROSMAP")
+
+# Cargamos la red
+net = getNetworkFromTissue(which.one="CoExpROSMAP",tissue="notad")
+
+
+# Seleccionamos una submuestra de tamaño 190
+set.seed(12345)
+exp.data2 <- expr.data[sample(nrow(expr.data),190),]
+```
+
+Para esta primera exploración tomaremos una submuestra de tamaño $190$, y lanzaremos la creación de dos redes de co-expresión con $20$ y $40$ bootstraps respectivamente. Esto se realiza a través del siguiente script:
+
+```{r,eval=FALSE}
+library(CoExpNets)
+library(CoExpROSMAP)
+CoExpROSMAP::initDb()
+library(WGCNA)
+WGCNA::enableWGCNAThreads(8)
+
+# Cargamos la base de datos disponible
+expr.data = getExprDataFromTissue(tissue="notad",
+                                  which.one="CoExpROSMAP")
+
+# Seleccionamos una submuestra de tamaño 190
+set.seed(12345)
+exp.data2 <- expr.data[sample(nrow(expr.data),190),]
+
+start.time1 <- Sys.time()
+# Lanzamos el proceso de creación de la red bootstrap
+set.seed(12345)
+getBootstrapNetwork(mode = "bootstrap",expr.data = exp.data2, 
+                    job.path = "results20/",
+                    removeTOMF = TRUE, blockTOM = TRUE,
+                    annotateFinalNet = TRUE,
+                    b = 20)
+end.time1 <- Sys.time()
+
+tiempoEjecucion1 <- end.time1 - start.time1
+print(tiempoEjecucion1)
+
+start.time2 <- Sys.time()
+# Lanzamos el proceso de creación de la red bootstrap
+set.seed(12345)
+getBootstrapNetwork(mode = "bootstrap",expr.data = exp.data2, 
+                    job.path = "results40/",
+                    removeTOMF = TRUE, blockTOM = TRUE,
+                    annotateFinalNet = TRUE,
+                    b = 40)
+end.time2 <- Sys.time()
+
+tiempoEjecucion2 <- end.time2 - start.time2
+print(tiempoEjecucion2)
+```
+
+Una vez haya terminado el método descargamos las redes de co-expresión resultantes.
+
+```{r}
+net.190.20 <- readRDS("netBootBootstrap.9.it.50.b.20.rds")
+
+net.190.40 <- readRDS("netBootBootstrap.9.it.50.b.40.rds")
+```
+
+
+# Análisis Comparativo
+
+Durante esta sección trataremos de realizar un análisis comparativo extenso de las dos redes bootstraps calculadas con el proceso anterior y la red inicial, que consideramos cómo nuestra gold standard. Para ello tomaremos varias consideraciones, o indicadores, que iremos explicando poco a poco. 
+
+## Número de Módulos
+
+En primer lugar podemos estudiar el número de módulos que tiene cada red. Cabe destacar que necesitamos un número de módulos que sea informativo. En este aspecto, redes con un número de muy alto, o muy bajo, de módulos no nos interesan, puesto que perdemos resolución en el resultado. Esto lo hacemos para las tres redes que tenemos en esta primera exploración.
+
+Vemos, inicialmente, el número de módulos que tiene la gold standard.
+
+```{r}
+length(unique(net$moduleColors))
+```
+
+Esta tiene un total de $56$ módulos, un número elevado para lo que realmente queremos.
+
+Sin embargo, las redes bootstraps lanzadas anteriormente, observamos que tienen un menor número de módulos.
+
+```{r}
+length(unique(net.190.20$moduleColors))
+
+length(unique(net.190.40$moduleColors))
+```
+
+La red con $20$ bootstraps tiene $20$ módulos, mientras que la red dada por $40$ bootstraps posee $24$ módulos. Estos número parecen ser algo más razonables a nivel informativo. 
+
+Sobre este primer indicador, en cuánto la número de módulos que se forman, parece que las redes bootstraps están muy lejos de la gold standard, sin embargo, parece que la red con $40$ bootstraps tiene un número total de módulos más coherente que el resto. Aún así, entendemos que una red con $30$ o $40$ módulos sería más óptima que las que hemos podido observar.
+
+
+
+## Tamaño y Entropía de los Módulos
+
+Por otro lado tenemos el concepto de `entropía`. La `entropía de Sannon`, mide la incerdidumbre de una fuente de información. Esta cuantifica el valor esperado de la información contenida en un mensaje. La fórmula, fue introducida por Claude E. Shannon en 1948, en su ensayo `A Mathematical Theory of Communication`. Esta fórmula es lo que se conoce cómo desinformación $H$:
+
+$$
+H(X)=-\sum_{i=1}^np(x_i)log_2 \frac{1}{p(x_i)}
+$$
+
+La base del logaritmo se corresponde con el tipo de preguntas que se realicen. Es decir, si en vez de preguntas binarias, se hiciesen preguntas terniarias, o de algún otor número de respuestas entonces debería de cambiar dicho valor correspondiente a la base del logaritmo. En nuestro caso, usaremos la fórmula tal y cómo está, con un valor $2$ en la base.
+
+La entropía posee una serie de propiedades que enumeramos a continuación:
+
++ Es no negativa, lo que es evidente puesto que estamos trabajando con probabilidades. Además, $log_2 p_i \leq 0$, luego $-log_2 p_i \leq 0$ y se cumple la positividad.
+
++ Si tomamos un proceso con posibles resultados ${A_1,...,A_n}$, cuyas probabilidades correspondientes son $p_1,...,p_n$. La entropía está acotada superiormente, es decir, posee un valor máximo, y este se da en el caso de que se cumpla que $p_1=p_2=...=p_n=\frac{1}{n}$. En este caso, tendríamos la máxima incertidumbre del mensaje, la máxima desinformación, puesto que estamos considerando que los posibles valores de la variable son equiprobables.
+
++ De nuevo, si tomamos un proceso con posibles resultados ${A_1,...,A_n}$, cuyas probabilidades correspondientes son $p_1,...,p_n$. La entropía está igualmente acotada inferiormente. En este caso, este suceso se da si $p_i=0 \forall i$ excepto para una cierta clase $p_j=1$. Al contrario que en el caso anterior, ahora tendríamos la mínima incertidumbre posible, o lo que es lo mismo, la máxima información posible.
+
+En nuestro caso, la entropía viene referida sobre los módulos obtenidos en las distintas redes de co-expresión. Si todos los módulos tienen aproximadamente el mismo número de genes no sería bueno puesto que se asemeja al caso anterior de equiprobabilidad, lo que supondría poca información y mucha incertidumbre en los resultados. 
+
+Observamos, inicialmente, un gráfico de barras sobre los módulos de la red original, nuestra gold standard.
+
+```{r,fig.cap="Módulos correspondientes a la red gold standard"}
+plotModSizes(tissue="notad",which.one="CoExpROSMAP")
+```
+
+Del mismo modo, podemos calcular su entropía de la siguiente forma:
+
+```{r}
+entropy(net$moduleColors)
+```
+
+El valor de $5.73$ es bastante alto, si consideramos que el máximo valor, si consideramos casos equiprobables, gracias a la fórmula vista anteriormente, es de $5.80$.
+
+Vemos que ocurre ahora con la red bootstraps realizada con $20$ bootstraps.
+
+```{r,fig.cap="Módulos correspondientes a la red con $20$ bootstraps sobre una submuestra de tamaño 190"}
+plotModSizes(tissue=net.190.20,which.one="new")
+```
+
+Comprobamos ahora su entropía.
+
+```{r}
+entropy(net.190.20$moduleColors)
+```
+
+En su caso, la entropía máxima sería de $4.32$, y la red posee un $4.26$, lo cual viene siendo una pequeña mejoría con respecto a la gold standard.
+
+Por último, observamos la red de $40$ bootstraps.
+
+```{r,fig.cap="Módulos correspondientes a la red con $40$ bootstraps sobre una submuestra de tamaño 190"}
+plotModSizes(tissue=net.190.40,which.one="new")
+```
+
+Su entropía correspondiente:
+
+```{r}
+entropy(net.190.40$moduleColors)
+```
+
+Para esta última red tenemos una mayor incertidumbre que en caso anteriores. El valor que nos ha dado el cálculo es de $4.55$, mientras que su valor máximo es de $4.58$.
+
+Concluímos que, en base a la definición de entropía, la red bootstraps con mayor información, y menos incertidumbre, se corresponde con la red dada por $20$ bootstraps. La red con $40$ bootstraps da poca información puesto que su entropía está bastante cercana a su valor máximo, cosa que se puede observar en el gráfico de barras sobre el tamaño de los módulos, y es que, a diferencia de la red de $20$ bootstraps, esta no tiene esos extremos tan pronunciados, algo que se ve claramente en la escala del eje y. 
+
+Por otro lado está la gold standard, evidentemente la entropía máxima siempre será mayor comparándola con las redes bootstraps que tenemos en el estudio por el número de módulos que posee. Sin embargo, si lo llevamos a escala, y comparamos sus resultados con la red dada por $20$ bootstraps, esta última red parece un poco mejor que la gold standar en cuanto a información se refiere.
+
+## Intra-module connectivity
+
+Otra de las formas de estudiar la calidad de los módulos otorgados por las redes reside en estudiar la conectividad intramodular de cada uno de los módulos. Para ello, el paquete `WGCNA` nos da una función que calcula esos valores. Esta función se llama `intramodularConnectivity.formExpr` y nos devuelve un data.frame con cuatro columnas con diferentes distinciones de conectividad.
+
++ `kTotal`: conectividad de cada gen, basa en sus `r-values`, con los demás genes de la red completa.
+
++ `kWithin`: conectividad de cada gen dentro de su módulo correspondiente, basado en sus r-values, con todos los demás genes dentro del mismo módulo.
+
+Posteriormente, tenemos `kOut` y `kDiff`, que son derivaciones matemáticas de las anteriores. En este caso:
+
++ $kOut = kTotal-kWithin$
+
++ $kDiff = kWithin - kOut$
+
+A este data frame le añadiremos una columna que nos diga el módulo al que pertenece cada gen, de esta manera se nos hará más fácil agrupar los distintos genes por módulo para realizar unos cálculos correspondientes.
+
+Comenzamos introduciendo los datos correspondientes a la gold standard.
+
+```{r}
+intra <- intramodularConnectivity.fromExpr(colors = net$moduleColors,datExpr = expr.data)
+rownames(intra) <- colnames(expr.data)
+
+intra$Module <- net$moduleColors
+
+intra
+```
+
+Observamos ahora que ocurre con al red dada por $20$ bootstraps:
+
+```{r}
+expr.data2 <- expr.data[rownames(net.190.20$MEs),]
+intra.20 <- intramodularConnectivity.fromExpr(colors = net.190.20$moduleColors,datExpr = expr.data2)
+rownames(intra.20) <- colnames(expr.data2)
+
+intra.20$Module <- net.190.20$moduleColors
+
+intra.20
+```
+
+Por último, hacemos lo propio con la red dada por $40$ bootstraps.
+
+```{r}
+expr.data2 <- expr.data[rownames(net.190.40$MEs),]
+intra.40 <- intramodularConnectivity.fromExpr(colors = net.190.40$moduleColors,datExpr = expr.data2)
+rownames(intra.40) <- colnames(expr.data2)
+
+intra.40$Module <- net.190.40$moduleColors
+
+intra.40
+```
+
+Ahora lo que vamos a hacer es calcular la media de las disntintas distinciones de conectividad vistas antes sobre cada uno de los módulos de cada red. La columnna introducida antes nos sirve para realizar esa agrupación por módulos y, de ahí, hacer los diferentes cálculos. Con esto queremos observar las diferencias entre conectividad que existen entre los módulos.
+
+Comenzamos inicialmente con la red gold standard
+
+```{r}
+intra %>%
+  group_by(Module) %>%
+  summarise(meankTotal = mean(kTotal),
+            meankWithin = mean(kWithin),
+            meankOut = mean(kOut),meankDiff = mean(kDiff))
+```
+
+Vemos ahora los datos para la red con $20$ bootstraps.
+
+```{r}
+intra.20 %>%
+  group_by(Module) %>%
+  summarise(meankTotal = mean(kTotal),
+            meankWithin = mean(kWithin),
+            meankOut = mean(kOut),meankDiff = mean(kDiff))
+```
+
+Por último, hacemos lo propio para la red con $40$ bootstraps.
+
+```{r}
+intra.40 %>%
+  group_by(Module) %>%
+  summarise(meankTotal = mean(kTotal),
+            meankWithin = mean(kWithin),
+            meankOut = mean(kOut),meankDiff = mean(kDiff))
+```
+
+
+## Cálculo del Índice Rand
+
+El índice Rand es una medidad de similitud entre dos agrupamientos de un conjunto de elementos dado. Su valor está se encuentra en el intervalo $[0,1]$, de modo que cuanto más cercano a $1$ más similitud existirá entre ambos clústers.
+
+El ínice rand entre la gold standard y la red de $20$ bootstraps de de $0.27$ cómo podemos ver:
+
+```{r}
+mclust::adjustedRandIndex(net$moduleColors,(net.190.20$moduleColors))
+```
+
+Añadiéndole $20$ bootrstraps más nos vamos a un valor de $0.3$:
+
+```{r}
+mclust::adjustedRandIndex(net$moduleColors,net.190.40$moduleColors)
+```
+
+En este caso, se puede observar que las dos redes bootstraps son muy poco similares a la red inicial. 
+
+Sin embargo, si comparamos las dos redes bootstraps, se tiene:
+
+```{r}
+mclust::adjustedRandIndex(net.190.20$moduleColors,net.190.40$moduleColors)
+```
+
+Dos redes más similares entre sí, aunque esa diferencia en el número de módulos hace que el índice sólo sea de $0.55$.
+
+El índice Rand nos está indicando cuánto de parecidas son nuestras redes. En este caso, las redes bootrstaps tienen poco similitud con la gold standard, algo que se podía intuir con los estudios vistos antes.
+
+## Anotación de las redes
+
+Por otro lado, tenemos que estudiar las anotaciones realizadas sobre cada una de las redes, en cuanto a la ontología `Gene Ontology` respecto sus términos de `BP`, `CC` y `MF`. Cuántas más anotaciones se generen, más enriquecida estará nuestra red y más información biológica podremos obtener.
+
+Inicialmente, deberemos de anotar nuestra gold standard. Para ello, hacemos uso del siguiente código gracais a una de la funciones del paquete de `CoExpNets`.
+
+```{r,eval=FALSE}
+net.name  <- "net.GoldSatandard.56"
+net.go = CoExpNets::getGProfilerOnNet(net.file=net,
+                             exclude.iea=F,
+			out.file=paste0(net.name,"_gprof.csv"))
+
+```
+
+Leemos el archivo generado:
+
+```{r}
+net.go <- read.csv("net.GoldSatandard.56_gprof.csv")
+```
+
+Ahora podemos mostrar los módulos en orden decreciente según su número de anotaciones.
+
+```{r}
+sort(table(net.go$query.number),decreasing=T)
+```
+
+Teniendo un total de $3850$ anotaciones dadas por la gold standard.
+
+```{r}
+sum(sort(table(net.go$query.number),decreasing=T))
+```
+
+Incluso podemos dividir las anotaciones según los términos ontológicos:
+
+```{r}
+sort(table(net.go$domain),decreasing = T)
+```
+
+
+Por otro lado, en el script correspondiente al lanzamiento del método de la red bootstrap, introduciendo, `anotateFinalnet=TRUE`, anotamos la red bootstraps final. Ahora, podemos cargar las anotaciones, en primer lugar, para la red de $20$ bootstraps.
+
+```{r}
+net.go.20 <- read.csv("netBootBootstrap.9.it.50.b.20.rds_gprof.csv")
+```
+
+Igual que hemos hecho antes, mostramos los módulos órdenados, en orden decreciente según su número de anotaciones.
+
+```{r}
+sort(table(net.go.20$query.number),decreasing=T)
+```
+
+Cuyo número total de anotaciones es:
+
+```{r}
+sum(sort(table(net.go.20$query.number),decreasing=T))
+```
+
+Algo menos de lo que teníamos inicialmente.
+
+Por último, vemos la red dada con $40$ bootstraps. Cargamos primero los datos:
+
+```{r}
+net.go.40 <- read.csv("netBootBootstrap.9.it.50.b.40.rds_gprof.csv")
+```
+
+Vemos la tabla correspondiente.
+
+```{r}
+sort(table(net.go.40$query.number),decreasing=T)
+```
+
+Para terminar, el número total de anotaciones.
+
+```{r}
+sum(sort(table(net.go.40$query.number),decreasing=T))
+```
+
+Algo más que en la red anterior de $20$ bootstraps, pero sigue siendo menos de lo que teníamos en la gold standard.
+
+En este caso, la información biológica es mayor en cuanto a la gold standar se refiere, aunque esto se puede deber también al número de módulos correspondientes. Sin embargo, hay que ir un poco más allá. Más de $30$ módulos de la gold standar, es decir, más del 50%, tienen menos de cincuenta anotaciones. Es más, quince de estos módulos tienen menos de $10$ anotaciones, o lo que es lo mismo, apenas tenemos información sobre estos módulos. La red con $24$ bootstraps, tiene exactamente el 50% de los módulos con menos de cincuenta anotaciones y tan sólo dos con menos de diez. Por último, la red con $20$ bootstraps, aunque sea la que menos anotaciones totales no está dando, parece que tiene estas mejor distribuidas. Y esque, tan sólo $8$ módulos tienen menos de cincuenta anotaciones, menos del 50%.
+
+
+## Anotación del Tipo de Célula
+
+Por otro lado también tenemos que considerar las anotaciones realizadas sobre los tipos de célula detectados en cada una de las redes y los correspondientes p-valores de las detecciones, o lo que se nos muestra, $-log(pval)$. En este último caso, cuanto más alto sea este valor mejor para nosotros.
+
+En primer lugar, vemos lo que ocurre con la gold standard.
+
+```{r,message=FALSE}
+library(gplots)
+```
+
+```{r,fig.width=12,fig.height=10}
+celltype.net <- genAnnotationCellType(which.one="new",net.in=net,return.processed = F,doheatmap = T)
+celltype.net <- celltype.net[apply(celltype.net, 1, function(x) any(x != 1 | is.na(x))),apply(celltype.net, 2, function(x) any(x != 1 | is.na(x))) ]
+kable(celltype.net,format = "html") %>%
+  kable_styling(position = "center")
+```
+
+Vemos ahora lo mismo con la red dada por $20$ bootstraps.
+
+```{r,fig.width=12,fig.height=10}
+celltype.net.20 <- genAnnotationCellType(which.one="new",net.in=net.190.20,return.processed = F,doheatmap = T)
+celltype.net.20 <- celltype.net.20[apply(celltype.net.20, 1, function(x) any(x != 1 | is.na(x))),apply(celltype.net.20, 2, function(x) any(x != 1 | is.na(x))) ]
+kable(celltype.net.20,format = "html") %>%
+  kable_styling(position = "center")
+```
+
+Por último, vemos los datos correspondientes a la red con $24$ bootstraps.
+
+```{r,fig.width=12,fig.height=10}
+celltype.net.40 <- genAnnotationCellType(which.one="new",net.in=net.190.40,return.processed = F,doheatmap = T)
+celltype.net.40 <- celltype.net.40[apply(celltype.net.40, 1, function(x) any(x != 1 | is.na(x))),apply(celltype.net.40, 2, function(x) any(x != 1 | is.na(x))) ]
+kable(celltype.net.40,format = "html") %>%
+  kable_styling(position = "center")
+```
+
+Si nos fijamos en los gráficos correspondientes, se puede ver cómo en la red con $20$ bootstraps posee más términos expresados en dicho gráfico sobre distintos tipos de célula, mientras que la red con $40$ bootstraps es la que menos tiene, por lo que esa primera red mecionada es la mejor de las dos redes bootstraps en cuanto a indicaciones del tipo de célula se refiere. Por otro lado, la gold standard también tiene menos indicadores que la red con $20$ bootstraps. 
+
+Es más, esta última red de $20$ bootstraps nos da un módulo bastante más expresado en `Astrocitos` que la gold standard. El término `Pyramidal_CA1` también tiene más expresión, menor p-valor, en la red bootstraps que en la gold standard. Luego, también existen algún que otro término, cómo `Pyramidal_S1` que en el gráfico correspondiente a la gold standard no apare puesto que no tiene un mínimo en cuánto a su p-valor se refiere mientras que sí aparece con la red bootstraps correspondiente. En este caso, se concluye que, en cuánto a los términos sobre el tipo de célula, la red con $20$ bootstraps, está aportando más información que el resto de redes.
+
+
+## Overlaps sobre MM
+
+Durante esta secciíon realizaremos un estudio de overlaps sobre los genes pertenecientes a cada módulo, primero entre la gold standard y la red con $20$ bootstraps y, posteriormente, haremos lo propio con la red de $40$ bootstraps. Sin embargo, no tomaremos todos los genes de cada módulo, si no que sólo escogeremos aquellos con mayor `Module Membership`. 
+
+El concepto de `Module Membership`, puede entenderse cómo una correlación entre un gen y el `Module Eigengene` del módulo correspondiente. En este caso, genes con un valor alto de `MM`, son buenos representantes del perfil de expresión global del módulo correspondiente. Del mismo modo, esos genes con valor alto de `MM`, tienden a ser genes `centrales` dentro del módulo, es decir, genes con una alta intraconectividad dentro del módulo.
+
+En este caso, inicialmente, lo que haremos será tomar tan sólo 5% de los genes de cada módulo, ordenados previamente según su `MM`. Posteriormente, usaremos la función `genCrossTabPlot` para realizar el correspondiente gráfico de overlaps entre módulos.
+
+
+```{r,echo=FALSE}
+genCrossTabPlot <- function(colors1,
+                            colors2,
+                            tissue1="Net 1",
+                            tissue2="Net 2",
+                            plot.file=NULL){
+
+  #We create a simple crosstab
+  XTbl <- overlapTable(colors1, colors2)
+  XTbl$pTable[] = p.adjust(XTbl$pTable,method="fdr")
+  toreturn = XTbl$pTable
+  #print(XTbl)
+  # Truncate p values smaller than 10^(-50) to 10^(-50)
+  XTbl$pTable <- -log10(XTbl$pTable)
+  #XTbl$pTable[is.infinite(XTbl$pTable)] = 1.3*max(XTbl$pTable[is.finite(XTbl$pTable)])
+  XTbl$pTable[XTbl$pTable>50 ] = 50
+
+  # Marginal counts (really module sizes)
+  ModTotals.1 = apply(XTbl$countTable, 1, sum)
+  ModTotals.2 = apply(XTbl$countTable, 2, sum)
+  if(!is.null(plot.file)){
+    pdf(plot.file,height=14,width=18)
+    print(paste0("Saving new plot ",plot.file))
+
+  }
+  par(mar=c(15, 12, 2.7, 1)+0.4)
+
+  # Use function labeledHeatmap to produce the color-coded table
+  #with all the trimmings
+  labeledHeatmap(Matrix = XTbl$pTable,
+                 yLabels = paste(" ", names(ModTotals.1)),xLabels = paste(" ",
+                                                                          names(ModTotals.2)),colorLabels = TRUE,
+                 textMatrix =XTbl$countTable,colors = greenWhiteRed(100)[50:100],
+                 ySymbols = paste(names(ModTotals.1)," : ", ModTotals.1, sep=""),
+                 xSymbols = paste(names(ModTotals.2)," : ", ModTotals.2, sep=""),
+                 main = paste0("Correspondence of ", tissue1," (rows) and ", tissue2, " (columns) modules",sep=""),
+                 cex.text = 0.8, cex.lab = 1.0, setStdMargins = FALSE, plotLegend= TRUE)
+  if(!is.null(plot.file))
+    dev.off()
+  return(toreturn)
+}
+```
+
+Comparamos primero la red gold standar con la red dada por $20$ bootstraps:
+
+```{r}
+mms.net <- getMM(which.one = "CoExpROSMAP",tissue = "notad",genes=NULL)
+```
+
+```{r}
+mms.net$module <- as.factor(mms.net$module)
+nombres <- c()
+for(i in levels(mms.net$module)){
+  suma = sum(net$moduleColors == i)
+  percent = 5*suma/100
+  percent = round(percent,digits = 0)
+  mms <- mms.net[which(mms.net$module == i),]
+  mmsOrder <- mms[order(mms$mm,decreasing = T),]
+  
+  for(j in 1:percent){
+    nombres <- c(nombres,mmsOrder$ensgene[j])
+  }
+}
+```
+
+```{r}
+net.MM.module <- net$moduleColors[nombres]
+```
+
+
+
+```{r}
+expr.data2 <- expr.data[rownames(net.190.20$MEs),]
+mms.20 = getMM(net = net.190.20,expr.data.file = expr.data2,genes = NULL)
+```
+
+```{r}
+mms.20$module <- as.factor(mms.20$module)
+nombres20 <- c()
+for(i in levels(mms.20$module)){
+  suma = sum(net.190.20$moduleColors == i)
+  percent = 5*suma/100
+  percent = round(percent,digits = 0)
+  mms <- mms.net[which(mms.net$module == i),]
+  mmsOrder <- mms[order(mms$mm,decreasing = T),]
+  
+  for(j in 1:percent){
+    nombres20 <- c(nombres20,mmsOrder$ensgene[j])
+  }
+}
+nombres20 <- nombres20[-1]
+```
+
+```{r}
+net.MM.module.20 <- net.190.20$moduleColors[nombres20]
+```
+
+
+```{r,fig.width=15,fig.height=15}
+genCrossTabPlot(net.MM.module
+                ,net.MM.module.20)
+```
+
+Hacemos lo propio, ahora comparando la gold standard con la red dada por $40$ bootstraps.
+
+```{r}
+expr.data40 <- expr.data[rownames(net.190.40$MEs),]
+mms.40 = getMM(net = net.190.40,expr.data.file = expr.data40,genes = NULL)
+```
+
+```{r}
+mms.40$module <- as.factor(mms.40$module)
+nombres40 <- c()
+for(i in levels(mms.40$module)){
+  suma = sum(net.190.40$moduleColors == i)
+  percent = 5*suma/100
+  percent = round(percent,digits = 0)
+  mms <- mms.net[which(mms.net$module == i),]
+  mmsOrder <- mms[order(mms$mm,decreasing = T),]
+  
+  for(j in 1:percent){
+    nombres40 <- c(nombres40,mmsOrder$ensgene[j])
+  }
+}
+nombres40 <- nombres40[-1]
+```
+
+```{r}
+net.MM.module.40 <- net.190.40$moduleColors[nombres40]
+```
+
+
+```{r,fig.width=15,fig.height=15}
+genCrossTabPlot(net.MM.module
+                ,net.MM.module.40)
+```
+
+En los dos gráficos correspondientes se puede ver cómo los genes de un módulo correspondiente de la gold standard sólo se relaciona con un módulo único de la red bootstraps. Sin embargo, un módulo de la red bootstraps si contiene más de un gen de distintos módulos de la gold standard. Esto ocurre debido a la diferencia entre la cantidad de módulos de las dos redes, pero que un módulo de la gold standard sólo relacione módulos con uno de la red bootstraps es, en este caso, una característica positiva. 
+
+Si intentamos comparar los dos gráficos de overlaps, podemos ver cómo la red con $40$ bootstraps tiene mayor singificancia en cuanto a la relación de ciertos módulos. Es decir, existen muy pocos casos en los que un módulo contenga genes importantes de más de dos módulos de la gold standard. En este sentido, se tiene una mejor aproximación con la red de $40$ bootstraps según este gráfico de overlaps.
