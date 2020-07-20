@@ -1,4 +1,4 @@
-# TFM-BootstrapCoexpressionNetwork
+# BootstrapCoexpressionNetwork
 
 In this project, a bootstrapping method has been designed, implemented and tested for the construction of co-expression networks that extends the algorithm given in the CoExpNets package.
 
